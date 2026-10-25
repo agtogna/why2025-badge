@@ -1,4 +1,42 @@
 dependencies:
+  esp-idf-lib/color:
+    component_hash: c019d319d3e55d167a4f57c269dca66ee0525b005a15d4470468cc3e14ad6b67
+    dependencies:
+    - name: esp-idf-lib/lib8tion
+      registry_url: https://components.espressif.com
+      require: private
+      version: '*'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32h2
+    - esp32p4
+    - esp32s2
+    - esp32s3
+    version: 1.0.7
+  esp-idf-lib/lib8tion:
+    component_hash: d9d932459e94c0fdaeedc6384beea87adf47e5ea6c166939f721a175744f5cee
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32
+    - esp32c2
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32c61
+    - esp32h2
+    - esp32p4
+    - esp32s2
+    - esp32s3
+    version: 1.0.8
   espressif/button:
     component_hash: 7cb7e2944b5828f409af0c92f7fcc0e2d405de09c3325b7ee4a0eba5fb28dfdc
     dependencies:
@@ -38,8 +76,9 @@ dependencies:
       type: idf
     version: 6.0.0
 direct_dependencies:
+- esp-idf-lib/color
 - espressif/button
 - espressif/cjson
-manifest_hash: baf722660f41fa99f5022f87bba78107a296da202d1b225d980987d60e5e6c91
+manifest_hash: 03255ae19cfb506db12d200910a28642cf8c2a7a5b527da9f96e0c6d2eea8197
 target: esp32c3
 version: 3.0.0

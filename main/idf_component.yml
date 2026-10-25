@@ -1,3 +1,4 @@
 dependencies:
   espressif/cjson: "^1.7.19"
   espressif/button: "^4.2.2"
+  esp-idf-lib/color: "^1.0.7"

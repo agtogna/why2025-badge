@@ -13,28 +13,33 @@ static volatile bool rainbow_loop_active = false; // Continuous rainbow animatio
 // LEDs and resets the current animation, so two tasks never drive the RMT at once.
 static volatile bool rainbow_restart_pending = false;
 
-static void i2c_register_write(uint8_t addr, uint8_t reg_addr, uint8_t data)
+static i2c_master_dev_handle_t aw9523; // chip 1 (0x5a); chip 2 (0x5b) is not driven
+
+static void i2c_register_write(uint8_t reg_addr, uint8_t data)
 {
     uint8_t write_buf[2] = {reg_addr, data};
-    i2c_master_write_to_device(0, addr, write_buf, sizeof(write_buf), 
-                                   I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    i2c_master_transmit(aw9523, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS);
 }
 
 static void i2c_master_init()
 {
-    int i2c_master_port = I2C_MASTER_NUM;
-    
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
+    i2c_master_bus_config_t bus_conf = {
+        .i2c_port = I2C_MASTER_NUM,
         .sda_io_num = I2C_MASTER_SDA_IO,
         .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
+    i2c_device_config_t dev_conf = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x5a,
+        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
+    };
+    i2c_master_bus_handle_t bus;
 
-    i2c_param_config(i2c_master_port, &conf);
-    i2c_driver_install(i2c_master_port, conf.mode, 0, 0, 0);
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_conf, &bus));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev_conf, &aw9523));
 }
 
 void led_init()
@@ -42,9 +47,9 @@ void led_init()
     i2c_master_init();
     // setup aw9523b led drivers.
     // chip 1, address = 0x5a; chip 2, address = 0x5b.
-    i2c_register_write(0x5a, 0x11, 0x01);
-    i2c_register_write(0x5a, 0x12, 0x80);
-    i2c_register_write(0x5a, 0x13, 0x80);    
+    i2c_register_write(0x11, 0x01);
+    i2c_register_write(0x12, 0x80);
+    i2c_register_write(0x13, 0x80);    
 
     strip = led_strip_init(LED_RMT_TX_GPIO, NUM_LEDS);
     if (!strip) ESP_LOGE(TAG, "LED strip init failed, LEDs disabled");
@@ -52,10 +57,10 @@ void led_init()
 
 void set_screen_led_backlight(uint8_t brigtness)
 {
-    i2c_register_write(0x5a, 0x20, brigtness);
-    i2c_register_write(0x5a, 0x21, brigtness);
-    i2c_register_write(0x5a, 0x22, brigtness);
-    i2c_register_write(0x5a, 0x23, brigtness);
+    i2c_register_write(0x20, brigtness);
+    i2c_register_write(0x21, brigtness);
+    i2c_register_write(0x22, brigtness);
+    i2c_register_write(0x23, brigtness);
 }
 
 static void led_rgb_color(uint8_t id, rgb_t color){

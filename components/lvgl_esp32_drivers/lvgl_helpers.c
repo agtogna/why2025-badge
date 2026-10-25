@@ -16,7 +16,9 @@
 #include "lvgl_spi_conf.h"
 #include "lvgl_i2c_conf.h"
 
+#if defined (SHARED_I2C_BUS) || defined (CONFIG_LV_TFT_DISPLAY_PROTOCOL_I2C) || defined (CONFIG_LV_TOUCH_DRIVER_PROTOCOL_I2C)
 #include "driver/i2c.h"
+#endif
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "src/lv_core/lv_refr.h"
@@ -166,6 +168,9 @@ void lvgl_driver_init(void)
  * So we should be able to know if the display and touch controllers shares the
  * same i2c master.
  */
+/* Only built when used: referencing the legacy i2c driver makes it abort at boot
+ * next to the new i2c_master driver (CONFLICT! driver_ng ...). */
+#if defined (SHARED_I2C_BUS) || defined (CONFIG_LV_TFT_DISPLAY_PROTOCOL_I2C) || defined (CONFIG_LV_TOUCH_DRIVER_PROTOCOL_I2C)
 bool lvgl_i2c_driver_init(int port, int sda_pin, int scl_pin, int speed_hz)
 {
     esp_err_t err;
@@ -196,6 +201,7 @@ bool lvgl_i2c_driver_init(int port, int sda_pin, int scl_pin, int speed_hz)
 
     return ESP_OK != err;
 }
+#endif
 
 /* Initialize spi bus master */
 bool lvgl_spi_driver_init(int host,

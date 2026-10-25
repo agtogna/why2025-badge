@@ -15,7 +15,8 @@
 #include "esp_netif_ip_addr.h"
 
 #include "driver/gpio.h"
-#include "button.h"
+#include "iot_button.h"
+#include "button_gpio.h"
 
 #define BUTTON_1 0x08 // DOWN button
 #define BUTTON_2 0x09 // UP button

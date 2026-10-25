@@ -977,47 +977,75 @@ void ui_switch_page_up()
     restore_current_task();
 }
 
+typedef enum { BTN_ACT_CLICK, BTN_ACT_HELD, BTN_ACT_LONG_RELEASE } btn_action_t;
+typedef struct {
+    uint8_t pin;
+    uint8_t action;
+} btn_msg_t;
+
+static QueueHandle_t button_events;
+static bool button_long[2]; // only touched from the button driver's timer callbacks
+
+static void button_send(uint8_t pin, uint8_t action)
+{
+    btn_msg_t msg = { .pin = pin, .action = action };
+    xQueueSend(button_events, &msg, 0); // callbacks run in esp_timer context: never block
+}
+
+static void button_long_start_cb(void *handle, void *usr_data)
+{
+    uint8_t pin = (uintptr_t)usr_data;
+    button_long[pin - BUTTON_1] = true;
+    button_send(pin, BTN_ACT_HELD);
+}
+
+static void button_press_up_cb(void *handle, void *usr_data)
+{
+    uint8_t pin = (uintptr_t)usr_data;
+    bool was_long = button_long[pin - BUTTON_1];
+    button_long[pin - BUTTON_1] = false;
+    button_send(pin, was_long ? BTN_ACT_LONG_RELEASE : BTN_ACT_CLICK);
+}
+
+static void button_create(uint8_t pin)
+{
+    const button_config_t btn_cfg = { .long_press_time = 1000 };
+    const button_gpio_config_t gpio_cfg = {
+        .gpio_num = pin,
+        .active_level = 0,
+        .disable_pull = true, // buttons have external pull-ups
+    };
+    button_handle_t btn;
+    ESP_ERROR_CHECK(iot_button_new_gpio_device(&btn_cfg, &gpio_cfg, &btn));
+    iot_button_register_cb(btn, BUTTON_LONG_PRESS_START, NULL, button_long_start_cb, (void *)(uintptr_t)pin);
+    iot_button_register_cb(btn, BUTTON_PRESS_UP, NULL, button_press_up_cb, (void *)(uintptr_t)pin);
+}
+
 void button_task(void *arg)
 {
-    static button_event_t curr_ev;
-    static button_event_t prev_ev[2];
-    static QueueHandle_t button_events;
-    button_events = button_init(PIN_BIT(BUTTON_1) | PIN_BIT(BUTTON_2));
+    btn_msg_t msg;
+    button_events = xQueueCreate(4, sizeof(btn_msg_t));
+    button_create(BUTTON_1);
+    button_create(BUTTON_2);
 
     while (true)
     {
-        if (xQueueReceive(button_events, &curr_ev, 1000 / portTICK_PERIOD_MS))
+        if (xQueueReceive(button_events, &msg, portMAX_DELAY))
         {
-            uint8_t btn_id = curr_ev.pin - 0x08;
-
-            if (curr_ev.event == BUTTON_HELD)
+            if (msg.action == BTN_ACT_HELD)
             {
                 set_screen_led_backlight(badge_obj.brightness_mid);
             }
-            if (curr_ev.pin == BUTTON_1) // DOWN button event
+            else if (msg.pin == BUTTON_1) // DOWN button
             {
-                if ((prev_ev[btn_id].event == BUTTON_HELD) && (curr_ev.event == BUTTON_UP))
-                {
-                    ui_switch_page_down();
-                }
-                else if ((prev_ev[btn_id].event == BUTTON_DOWN) && (curr_ev.event == BUTTON_UP))
-                {
-                    ui_button_down();
-                }
+                if (msg.action == BTN_ACT_LONG_RELEASE) ui_switch_page_down();
+                else ui_button_down();
             }
-
-            if (curr_ev.pin == BUTTON_2) // UP button event
+            else if (msg.pin == BUTTON_2) // UP button
             {
-                if ((prev_ev[btn_id].event == BUTTON_HELD) && (curr_ev.event == BUTTON_UP))
-                {
-                    ui_switch_page_up();
-                }
-                else if ((prev_ev[btn_id].event == BUTTON_DOWN) && (curr_ev.event == BUTTON_UP))
-                {
-                    ui_button_up();
-                }
+                if (msg.action == BTN_ACT_LONG_RELEASE) ui_switch_page_up();
+                else ui_button_up();
             }
-            prev_ev[btn_id] = curr_ev;
         }
     }
 }

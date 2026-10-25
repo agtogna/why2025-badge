@@ -228,7 +228,7 @@ KiCad `WHY_LOGO` footprint.
 - Logging uses `ESP_LOGI(__FILE__, ...)`.
 - `data/` (SPIFFS) and `main/` (firmware) are two independent flash images —
   remember to reflash the filesystem after editing JSON/web assets.
-- `components/` vendors LVGL (v7), lvgl_esp32_drivers, esp32-button, color, lib8tion.
+- `components/` vendors LVGL (v7), lvgl_esp32_drivers, color, lib8tion.
 - Easter eggs: LED sequences (e.g. rainbow) triggered by input patterns in
   `led.c`; a "collision" bug between easter eggs and normal flashing was fixed
   in git history.

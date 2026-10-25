@@ -16,9 +16,6 @@
         "username": "emf",
         "password": "emf"
     },
-    "sync": {
-        "url": "https://www.emfcamp.org/schedule/2026.json"
-    },
     "display": {
         "brightness_max": 205,
         "brightness_mid": 128,

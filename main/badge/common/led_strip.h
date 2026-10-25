@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 #include "esp_err.h"
-#include "driver/rmt.h"
+#include "driver/gpio.h"
 
 /**
 * @brief LED Strip Type
@@ -100,17 +100,17 @@ struct led_strip_s {
 */
 typedef struct {
     uint32_t max_leds;   /*!< Maximum LEDs in a single strip */
-    led_strip_dev_t dev; /*!< LED strip device (e.g. RMT channel, PWM channel, etc) */
+    gpio_num_t gpio;     /*!< GPIO driving the strip data line */
 } led_strip_config_t;
 
 /**
  * @brief Default configuration for LED strip
  *
  */
-#define LED_STRIP_DEFAULT_CONFIG(number, dev_hdl) \
-    {                                             \
-        .max_leds = number,                       \
-        .dev = dev_hdl,                           \
+#define LED_STRIP_DEFAULT_CONFIG(number, gpio_num) \
+    {                                              \
+        .max_leds = number,                        \
+        .gpio = gpio_num,                          \
     }
 
 /**
@@ -125,13 +125,12 @@ led_strip_t *led_strip_new_rmt_ws2812(const led_strip_config_t *config);
 /**
  * @brief Init the RMT peripheral and LED strip configuration.
  *
- * @param[in] channel: RMT peripheral channel number.
  * @param[in] gpio: GPIO number for the RMT data output.
  * @param[in] led_num: number of addressable LEDs.
  * @return
  *      LED strip instance or NULL
  */
-led_strip_t * led_strip_init(rmt_channel_t channel, gpio_num_t gpio, uint16_t led_num);
+led_strip_t * led_strip_init(gpio_num_t gpio, uint16_t led_num);
 
 /**
  * @brief Denit the RMT peripheral.

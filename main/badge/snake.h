@@ -12,7 +12,7 @@
 #define SNAKE_MIN_SPEED 8
 #define SNAKE_STEP_SPEED 3
 
-// high score lives on the SPIFFS filesystem, like Space Invaders (/data/invaders_hi)
+// high score lives on the SPIFFS filesystem (/data/snake_hi)
 #define SNAKE_HIGHSCORE_FILE "/data/snake_hi"
 
 enum SNAKE_DIR

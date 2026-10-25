@@ -4,6 +4,7 @@
  * Mostly taken from lbthomsen/esp-idf-littlevgl github.
  */
 
+#include "esp_rom_gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -88,25 +89,25 @@ void st7789_init(void)
     };
 
     //Initialize non-SPI GPIOs
-    gpio_pad_select_gpio(ST7789_DC);
+    esp_rom_gpio_pad_select_gpio(ST7789_DC);
     gpio_set_direction(ST7789_DC, GPIO_MODE_OUTPUT);
 
 #if !defined(CONFIG_LV_DISP_ST7789_SOFT_RESET)
-    gpio_pad_select_gpio(ST7789_RST);
+    esp_rom_gpio_pad_select_gpio(ST7789_RST);
     gpio_set_direction(ST7789_RST, GPIO_MODE_OUTPUT);
 #endif
 
 #if ST7789_ENABLE_BACKLIGHT_CONTROL
-    gpio_pad_select_gpio(ST7789_BCKL);
+    esp_rom_gpio_pad_select_gpio(ST7789_BCKL);
     gpio_set_direction(ST7789_BCKL, GPIO_MODE_OUTPUT);
 #endif
 
     //Reset the display
 #if !defined(CONFIG_LV_DISP_ST7789_SOFT_RESET)
     gpio_set_level(ST7789_RST, 0);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     gpio_set_level(ST7789_RST, 1);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 #else
     st7789_send_cmd(ST7789_SWRESET);
 #endif
@@ -119,7 +120,7 @@ void st7789_init(void)
         st7789_send_cmd(st7789_init_cmds[cmd].cmd);
         st7789_send_data(st7789_init_cmds[cmd].data, st7789_init_cmds[cmd].databytes&0x1F);
         if (st7789_init_cmds[cmd].databytes & 0x80) {
-                vTaskDelay(100 / portTICK_RATE_MS);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
         }
         cmd++;
     }

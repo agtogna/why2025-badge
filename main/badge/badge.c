@@ -50,33 +50,6 @@ char* load_file_content(char* filename){
     return content_buf;
 }
 
-char* load_schedule_from_file() {
-    FILE *fp = fopen(SCHEDULE_FILE, "r");
-    ESP_LOGI(__FILE__, "File to open: %s", SCHEDULE_FILE);
-    
-    if(!fp){
-        ESP_LOGE(__FILE__, "Cannot open file %s", SCHEDULE_FILE);
-        return NULL;
-    }
-
-    /* Get the file size */
-    fseek(fp, 0, SEEK_END); // seek to end of file
-    int file_size = ftell(fp);  // get current file pointer
-    fseek(fp, 0, SEEK_SET); // seek back to beginning of file
-
-    ESP_LOGI(__FILE__, "schedule: max contiguous free_heap_size = %lu\n", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    char* data_buf = (char*)malloc(file_size + 1);
-    if(!data_buf){
-        fclose(fp);
-        ESP_LOGE(__FILE__, "Cannot allocate memory of %d bytes", file_size);
-        return NULL;
-    } 
-    fread(data_buf, 1, file_size, fp);
-    data_buf[file_size] = '\0';  // Null-terminate the string
-    fclose(fp);
-    return data_buf;
-}
-
 cJSON* load_default() {
     char* default_content = load_file_content(DEFAULT_FILE);
     return cJSON_Parse(default_content);
@@ -233,7 +206,6 @@ void badge_init(){
     cJSON *obj_web = cJSON_GetObjectItem(json_settings, "web");
     cJSON *obj_ap = cJSON_GetObjectItem(json_settings, "ap");
     cJSON *obj_sta = cJSON_GetObjectItem(json_settings, "sta");
-    cJSON *obj_sync = cJSON_GetObjectItem(json_settings, "sync");
     cJSON *obj_display = cJSON_GetObjectItem(json_settings, "display");
 
     const char* badge_name = json_get_str_value(obj_badge, "name"); // should be empty
@@ -261,15 +233,6 @@ void badge_init(){
     snprintf(badge_obj.ap_password, SIZEOF(badge_obj.ap_password), "%s", ap_password);
     snprintf(badge_obj.sta_ssid, SIZEOF(badge_obj.sta_ssid), "%s", sta_ssid);
     snprintf(badge_obj.sta_password, SIZEOF(badge_obj.sta_password), "%s", sta_password);
-
-    // Full sync URL from settings ("sync.url").
-    cJSON* sync_url_item = cJSON_GetObjectItem(obj_sync, "url");
-    if (cJSON_IsString(sync_url_item) && sync_url_item->valuestring) {
-        snprintf(badge_obj.sync_url, SYNC_URL_MAX, "%s", sync_url_item->valuestring);
-    } else {
-        badge_obj.sync_url[0] = '\0';
-        ESP_LOGW(__FILE__, "No sync.url configured in settings");
-    }
 
     // WPA2/WPA3-Enterprise (802.1X) STA settings (optional keys; default to
     // a plain open/PSK network when absent)

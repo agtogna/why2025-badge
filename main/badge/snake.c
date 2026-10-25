@@ -1,16 +1,17 @@
 #include "snake.h"
+#include <inttypes.h>
 
 const char ui_snake_eyes[][4] = {"' '", ": ", ". .", " :"};
 
 static snake_t snake;
 
-// ---- high score, persisted to a SPIFFS file (like Space Invaders) ----
+// ---- high score, persisted to a SPIFFS file ----
 static uint32_t snake_load_high(void)
 {
     uint32_t v = 0;
     FILE *fp = fopen(SNAKE_HIGHSCORE_FILE, "r");
     if (fp) {
-        if (fscanf(fp, "%u", &v) != 1) v = 0;
+        if (fscanf(fp, "%" SCNu32, &v) != 1) v = 0;
         fclose(fp);
     }
     return v;
@@ -81,7 +82,7 @@ void snake_reset(lv_obj_t *parent)
     snake_save_high(snake.high);
     snake.score = 0;
 
-    // HUD labels: black text (white screen), top corners like Space Invaders.
+    // HUD labels: black text (white screen), top corners.
     // Created once (snake_reset is also the death handler and doesn't clear them).
     if (!snake.lbl_score) {
         snake.lbl_score = lv_label_create(parent, NULL);

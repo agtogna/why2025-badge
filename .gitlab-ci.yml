@@ -3,7 +3,6 @@ image: python:3.9
 cache:
   paths:
     - ~/.cache/pip
-    - ~/.platformio/.cache
 
 stages:
  - build
@@ -35,18 +34,14 @@ minify-js-prod:
 
 build-firmware:
   stage: deploy
-  image: python:latest
-  before_script:
-    - "pip install -U platformio"
-  script: 
-    - pip install -U platformio
-    - platformio run -e emf2026-badge
-    - cp -r output/ ./data/www/
-    - platformio run --target buildfs --environment emf2026-badge
-    - mv .pio/build/emf2026-badge/firmware.bin firmware.bin
-    - mv .pio/build/emf2026-badge/spiffs.bin spiffs.bin
-    - mv .pio/build/emf2026-badge/partitions.bin partitions.bin
-    - mv .pio/build/emf2026-badge/bootloader.bin bootloader.bin
+  image: espressif/idf:v6.0
+  script:
+    - cp -r output/. ./data/www/
+    - idf.py build
+    - python $IDF_PATH/components/spiffs/spiffsgen.py 0x100000 data spiffs.bin
+    - mv build/badge-firmware.bin firmware.bin
+    - mv build/partition_table/partition-table.bin partitions.bin
+    - mv build/bootloader/bootloader.bin bootloader.bin
   artifacts:
     paths:
       - bootloader.bin

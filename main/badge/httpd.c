@@ -171,30 +171,6 @@ static esp_err_t system_info_handler(httpd_req_t *req)
     return err;
 }
 
-static esp_err_t schedule_handler(httpd_req_t *req){
-    httpd_resp_set_type(req, "application/json");
-
-    // Stream the file in chunks so handler RAM is bounded regardless of the
-    // schedule size (the file is served verbatim, preserving the JSON wrapper).
-    FILE* fp = fopen(SCHEDULE_FILE, "r");
-    if(!fp) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Cannot open schedule file");
-        return ESP_FAIL;
-    }
-
-    char buf[1024];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
-        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
-            fclose(fp);
-            return ESP_FAIL;
-        }
-    }
-    fclose(fp);
-    httpd_resp_send_chunk(req, NULL, 0);   // terminate the response
-    return ESP_OK;
-}
-
 static esp_err_t login_handler(httpd_req_t *req, const char* client_data){
     httpd_resp_set_type(req, "application/json");
 
@@ -475,8 +451,6 @@ static esp_err_t post_handler(httpd_req_t *req)
         logout_handler(req, buf);
     } else if (is_string_match(cmd, "check_authentication")) {
         check_auth_handler(req, buf);
-    } else if (is_string_match(cmd, "schedule")) {
-        schedule_handler(req);
     } else if (is_string_match(cmd, "info")) {
         system_info_handler(req);
     } else if (is_string_match(cmd, "radar")) {

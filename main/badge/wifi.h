@@ -16,6 +16,8 @@
 #define STA_TIMEOUT_MS 20000
 #define STA_MAXIMUM_RETRY 5
 
+#define WIFI_SCAN_MAX 16
+
 void wifi_init(void);
 
 bool start_wifi_ap(void);
@@ -25,5 +27,8 @@ bool start_wifi_apsta(void);
 void stop_wifi(void);
 
 void wifi_task(void *);
+
+// Copy the latest scan (strongest first) into out; returns the AP count.
+uint8_t wifi_get_scan(wifi_ap_record_t *out, uint8_t max);
 
 #endif

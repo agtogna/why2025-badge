@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_random.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -15,18 +19,13 @@
 #include "bt.h"
 #include "wifi.h"
 #include "httpd.h"
-#include "sync.h"
 #include "ui.h"
 
 #define SETTINGS_FILE "/data/settings.json"
 #define DEFAULT_FILE "/data/default.json"
-#define SCHEDULE_FILE "/data/schedule.json"
-#define TMP_SCHEDULE_FILE "/data/schedule.json.tmp"
 
 #define BADGE_BUF_SIZE 20
 #define BADGE_NAME_MAX_SIZE 28
-#define SCHEDULE_BUFFER_LEN 10000
-#define SYNC_URL_MAX 160
 
 #define MAX_NEARBY_NODE 16
 #define SIZEOF(a) sizeof(a)/sizeof(*a)
@@ -54,16 +53,13 @@ typedef struct {
     bool sta_enterprise;
     char sta_identity[BADGE_BUF_SIZE];
     char sta_username[BADGE_BUF_SIZE];
-    char sync_url[SYNC_URL_MAX];
 
     // Display brightness settings
     uint8_t brightness_max;
     uint8_t brightness_mid;
     uint8_t brightness_off;
 
-    char* schedule_buffer;
     bool (*update)(int id, char* data); 
-    // bool (*update_schedule)();
 } badge_obj_t;
 
 typedef struct {
@@ -79,8 +75,9 @@ enum enum_badge_event {
     EVENT_HOTSPOT_STOP, 
     EVENT_STA_START,
     EVENT_STA_STOP,
-    EVENT_SYNC_START, 
-    EVENT_SYNC_STOP
+    EVENT_SCAN_START,
+    EVENT_SCAN_STOP,
+    EVENT_SCAN_DONE
 };
 
 extern QueueHandle_t wifi_queue;
@@ -89,7 +86,6 @@ extern badge_obj_t badge_obj;
 
 void badge_init();
 char* load_file_content(char* filename);
-char* load_schedule_from_file();
 
 uint8_t count_ble_nodes();
 bool check_ble_set();

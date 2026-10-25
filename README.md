@@ -45,20 +45,21 @@ You can interact with the screen by short pressing (up or down) one of the two D
 The Cyber Saiyan EMF2026 logo
 ![EMF2026 first screen](img/screen-1.jpg)
 
-### Second screen
+### Second Screen
 
-The EMF Camp 2026 talks schedule. Use the 5th screen to update it.
-![EMF2026 second screen](img/screen-2.jpg)
+The badge radar, showing nearby badges in a Dragon Ball style.
+![EMF2026 second screen](img/screen-3.jpg)
 
 ### Third Screen
 
-The badge radar, showing nearby badges in a Dragon Ball style.
-![EMF2026 third screen](img/screen-3.jpg)
-
-### Fourth screen
-
 The badge's list, you can see all the badges around in a table view
-![EMF2026 fourth screen](img/screen-4.jpg)
+![EMF2026 third screen](img/screen-4.jpg)
+
+### Fourth Screen
+
+Wi-Fi scan.
+
+Live list of the surrounding Wi-Fi networks (SSID, channel, signal strength in dBm with bars), strongest first. It scans only while shown, and only if AP/STA mode is off.
 
 ### Fifth screen
 
@@ -71,22 +72,15 @@ Start the AP mode (move up the Dial Wheel Switch) and connect from your PC/phone
 ![EMF2026 AP screen](img/screen-ap.jpg)
 ![EMF2026 webserver](img/webserver.jpg)
 
-#### SYNC SCHEDULE
+#### WIFI STA
 
-Start the SYNC mode (move down the Dial Wheel Switch) in order to update the schedule; the badge connects to the EMF Wi-Fi and downloads the latest talks schedule from emfcamp.org
+STA mode (connect to the Wi-Fi configured in `sta`) is implemented but disabled in the UI. Set `UI_STA_ENABLED` to `1` in `main/badge/ui.h` to show the button and start it by moving the Dial Wheel Switch down.
 
 ### Sixt Screen
 Have fun while playing Snake! 🐍
 ![EMF2026 sixth screen](img/screen-6.jpg)
 
 ### Seventh Screen
-Space Invaders! 👾 Roll a Dial Wheel **UP to move the laser cannon left** and
-**DOWN to move it right**, and press **both wheels together to FIRE** at the
-descending invaders. Your score and the all-time high score (saved on the badge)
-are shown at the top. Short-press a wheel to play again after game over.
-![EMF2026 seventh screen](img/screen-7.jpg)
-
-### Eighth Screen
 Rainbow loop! 🌈 A continuous LED animation across all 7 front RGB LEDs —
 great for walking around camp and showing off some lights at night. It starts
 the moment you arrive on this screen and stops the moment you leave it. Short
@@ -191,12 +185,13 @@ If a badge is stuck in a boot loop (serial log repeats `esp_image: invalid segme
 4. Keep holding the left button for **~2 seconds** after releasing RST, then release it.
 5. Reflash both partitions:
    ```
-   pio run -e emf2026-badge -t upload
-   pio run -e emf2026-badge -t uploadfs
+   idf.py -p /dev/ttyACM0 flash
+   python $IDF_PATH/components/spiffs/spiffsgen.py 0x100000 data build/storage.bin
+   esptool.py --chip esp32c3 -p /dev/ttyACM0 write_flash 0x210000 build/storage.bin
    ```
-   (`upload` fixes the corrupted firmware; `uploadfs` refreshes the filesystem — settings/high scores regenerate from defaults on next boot.)
+   (`flash` fixes the corrupted firmware; the `storage.bin` write refreshes the filesystem — settings/high scores regenerate from defaults on next boot.)
 
-The badge's native USB-JTAG interface will normally re-enumerate on its own after the flash; if `pio` can't find the port automatically, pass it explicitly, e.g. `--upload-port /dev/cu.usbmodemXXXX` (find it with `pio device list`).
+The badge's native USB-JTAG interface will normally re-enumerate on its own after the flash; if the port is not found automatically, pass it explicitly with `-p`, e.g. `-p /dev/cu.usbmodemXXXX`.
 
 During the boot process, the messages by the ROM code can be printed to (Default) UART0 and USB Serial/JTAG controller. 
 ___
@@ -230,7 +225,7 @@ The battery is charged using a [TP4054](hardware/datasheet/TP4054.pdf) single-ch
 # Firmware architecture
 
 For a detailed reference of the firmware — boot flow, FreeRTOS tasks, screens,
-BLE / Wi-Fi, the streaming schedule-sync pipeline, config & storage, the
+BLE / Wi-Fi, config & storage, the
 build/flash workflow and the non-obvious gotchas — see **[SKILL.md](SKILL.md)**.
 
 It is written as a [Claude Code](https://www.claude.com/product/claude-code)
@@ -246,21 +241,14 @@ Install Visual Studio Code as development environment:
 
 * https://code.visualstudio.com/ - follow instructions there, if you don't have vscode yet.
 
-### PlatformIO (PIO) extension
-Install PlatformIO extension on Visual Studio Code:
+### ESP-IDF
+Install [ESP-IDF v6.0](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/get-started/) (or use the `espressif/idf:v6.0` Docker image), then:
 
-* [Installation](http://docs.platformio.org/page/ide/vscode.html)
-* [Quick Start](http://docs.platformio.org/page/ide/vscode.html#quick-start)
-* [User Guide](http://docs.platformio.org/page/ide/vscode.html#user-guide)
-
-Please follow to the official documentation [PlatformIO IDE for VSCode](http://docs.platformio.org/page/ide/vscode.html).
+* `idf.py build` builds the firmware (settings come from `sdkconfig.defaults`).
 
 ## Setup the project
 
 * Git clone this repository and open it on VSCode
-
-If you get a `No module named pkg_resources` error, open the PlatformIO Core CLI and run:
-   * `pip install setuptools`
 
 ## Build www data (Linux)
 
@@ -280,22 +268,21 @@ If you get a `No module named pkg_resources` error, open the PlatformIO Core CLI
    
 ## Build/Upload Filesystem
 
-In order to upload the filesystem to the badge you need to plugin the badge using USB.
-In the "Project Tasks" view of PIO navigate to:
+Plug the badge in via USB, then build and write the SPIFFS image:
 
-* `emf2026-badge`
-   * `Platform`
-      * `Build Filesystem Image`
-      * `Upload Filesystem Image`
+```
+python $IDF_PATH/components/spiffs/spiffsgen.py 0x100000 data build/storage.bin
+esptool.py --chip esp32c3 -p /dev/ttyACM0 write_flash 0x210000 build/storage.bin
+```
 
 ## Build/Upload Firmware
-In order to upload the firmware to the badge you need to plugin the badge using USB.
-In the "Project Tasks" view of PIO navigate to:
 
-* `emf2026-badge`
-   * `General`
-      * `Build`
-      * `Upload`
+Plug the badge in via USB, then:
+
+```
+idf.py build
+idf.py -p /dev/ttyACM0 flash
+```
 
 # Known Issues
 Check [GitHub issue tracker](https://github.com/CyberSaiyanIT/why2025-badge/issues)

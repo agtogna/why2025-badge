@@ -8,7 +8,10 @@ static const char *TAG = "strip_ws2812";
 static const uint8_t led_order[] = {2, 6, 1, 0, 4, 5, 3}; // 0: center, 6: top
 static led_strip_t *strip;
 static bool easter_egg_active = false; // Flag to block LED flashing during easter eggs
-static bool rainbow_loop_active = false; // Continuous rainbow animation, driven by led_task
+static volatile bool rainbow_loop_active = false; // Continuous rainbow animation, driven by led_task
+// Set by the UI task; led_task (the only task that may touch the strip) clears the
+// LEDs and resets the current animation, so two tasks never drive the RMT at once.
+static volatile bool rainbow_restart_pending = false;
 
 static void i2c_register_write(uint8_t addr, uint8_t reg_addr, uint8_t data)
 {
@@ -43,7 +46,8 @@ void led_init()
     i2c_register_write(0x5a, 0x12, 0x80);
     i2c_register_write(0x5a, 0x13, 0x80);    
 
-    strip = led_strip_init(LED_RMT_TX_CHANNEL, LED_RMT_TX_GPIO, NUM_LEDS);
+    strip = led_strip_init(LED_RMT_TX_GPIO, NUM_LEDS);
+    if (!strip) ESP_LOGE(TAG, "LED strip init failed, LEDs disabled");
 }
 
 void set_screen_led_backlight(uint8_t brigtness)
@@ -78,6 +82,7 @@ static void all_on(rgb_t color){
 }
 
 static void all_off(){
+    if (!strip) return;
     // Clear LED strip (turn off all LEDs)
     ESP_ERROR_CHECK(strip->clear(strip, 100));
     vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -144,15 +149,22 @@ static void set_leds_by_badge_id(rgb_t color){
     round = !round;
 }
 
+// Sleep up to ms, but return early once the Rainbow screen is entered so
+// flash()'s long waits cannot delay the animation start.
+static void led_wait(int ms) {
+    for (; ms > 0 && !rainbow_loop_active; ms -= 50)
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+}
+
 void flash(int period, uint8_t fade_factor) {
     rgb_t color = rgb_from_code(MAGENTA_SAIYAN);
     color = rgb_fade(color, fade_factor);
     ESP_LOGI(__FILE__, "Start flashing");
     set_leds_by_badge_id(color);
-    vTaskDelay(300 / portTICK_PERIOD_MS);
+    led_wait(300);
     all_off();
     ESP_LOGI(__FILE__, "All LEDs off");
-    vTaskDelay(period / portTICK_PERIOD_MS);
+    led_wait(period);
 }
 
 void set_completed(){
@@ -408,8 +420,7 @@ static void rainbow_animate(void) {
 
 void rainbow_next_animation(void) {
     rainbow_anim_index = (rainbow_anim_index + 1) % NUM_RAINBOW_ANIMS;
-    for (int i = 0; i < NUM_LEDS; i++) led_rgb_off(i);   // clear before the next one starts painting
-    rainbow_anims[rainbow_anim_index].reset();
+    rainbow_restart_pending = true;   // led_task clears the LEDs and resets the new animation
     ESP_LOGI(__FILE__, "Rainbow animation -> %s", rainbow_anims[rainbow_anim_index].name);
 }
 
@@ -422,12 +433,10 @@ void set_rainbow_loop_active(bool active) {
     if (active) {
         // always restart from the first animation when entering the screen
         rainbow_anim_index = 0;
-        rainbow_anims[rainbow_anim_index].reset();
-    } else {
-        // Leaving the rainbow screen: clear the LEDs rather than leaving them
-        // stuck on whatever colors the loop last painted.
-        for (int i = 0; i < NUM_LEDS; i++) led_rgb_off(i);
+        rainbow_restart_pending = true;
     }
+    // Leaving: led_task clears the LEDs (see led_task) instead of leaving them
+    // stuck on whatever colors the loop last painted.
     ESP_LOGI(__FILE__, "Rainbow loop %s (%s)", active ? "STARTED" : "STOPPED",
              rainbow_anims[rainbow_anim_index].name);
 }
@@ -440,14 +449,25 @@ void set_easter_egg_active(bool active) {
 void led_task(void* arg)
 {
     while(1){
-        // Rainbow screen loop takes priority over everything else here. If
-        // led_task is mid-flash() when this flips on, it won't take effect
-        // until that call returns (flash() blocks for several seconds); from
-        // the next loop iteration onward it preempts the normal LED behavior.
+        // Rainbow screen loop takes priority over everything else here.
+        // flash()'s waits poll rainbow_loop_active, so this takes effect within
+        // ~50ms even if led_task was mid-flash.
+        static bool was_rainbow = false;
         if (rainbow_loop_active) {
+            was_rainbow = true;
+            if (rainbow_restart_pending) {
+                rainbow_restart_pending = false;
+                for (int i = 0; i < NUM_LEDS; i++) led_rgb_off(i);
+                rainbow_anims[rainbow_anim_index].reset();
+            }
             rainbow_animate();
             vTaskDelay(RAINBOW_TICK_MS / portTICK_PERIOD_MS);
             continue;
+        }
+
+        if (was_rainbow) {
+            was_rainbow = false;
+            for (int i = 0; i < NUM_LEDS; i++) led_rgb_off(i);
         }
 
         ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());

@@ -5,7 +5,6 @@
         "istream": "c",
         "ostream": "c",
         "streambuf": "c",
-        "schedule.h": "c",
         "cjson.h": "c",
         "unordered_map": "c",
         "string.h": "c",
@@ -31,5 +30,6 @@
         "stdint.h": "c",
         "semphr.h": "c",
         "stdio.h": "c"
-    }
+    },
+    "idf.currentSetup": "/home/tag/.espressif/v6.1/esp-idf"
 }

@@ -1,5 +1,5 @@
 #include "wifi.h"
-#include "esp_wpa2.h"
+#include "esp_eap_client.h"
 
 static const char *TAG = "WIFI";
 
@@ -13,13 +13,13 @@ static void sta_apply_enterprise(void)
 	const char* identity = strlen(badge_obj.sta_identity) > 0
 		? badge_obj.sta_identity : badge_obj.sta_username;
 
-	ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_identity(
+	ESP_ERROR_CHECK( esp_eap_client_set_identity(
 		(const unsigned char*)identity, strlen(identity)) );
-	ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_username(
+	ESP_ERROR_CHECK( esp_eap_client_set_username(
 		(const unsigned char*)badge_obj.sta_username, strlen(badge_obj.sta_username)) );
-	ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_password(
+	ESP_ERROR_CHECK( esp_eap_client_set_password(
 		(const unsigned char*)badge_obj.sta_password, strlen(badge_obj.sta_password)) );
-	ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_enable() );
+	ESP_ERROR_CHECK( esp_wifi_sta_enterprise_enable() );
 
 	ESP_LOGI(TAG, "STA WPA-Enterprise enabled (identity:%s username:%s)",
 		identity, badge_obj.sta_username);
@@ -47,6 +47,11 @@ static void inactivity_timer_callback(void* arg)
 static void event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        uint32_t ev = EVENT_SCAN_DONE;
+        if (wifi_queue) xQueueSend(wifi_queue, &ev, 0);
+        return;
+    }
     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",
@@ -98,7 +103,7 @@ void wifi_init(void)
 	ESP_ERROR_CHECK( esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL) );
 	ESP_ERROR_CHECK( esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, &event_handler, NULL) );
 	ESP_ERROR_CHECK( esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &event_handler, NULL) );
-	// ESP_ERROR_CHECK( esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &event_handler, NULL) );
+	ESP_ERROR_CHECK( esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event_handler, NULL) );
 
 
 	ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
@@ -130,7 +135,7 @@ bool start_wifi_ap(void)
 
 
 	ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_AP) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config) );
+	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_AP, &wifi_config) );
 	ESP_ERROR_CHECK( esp_wifi_start() );
 	ESP_ERROR_CHECK( esp_wifi_set_inactive_time(WIFI_IF_AP, AP_INACTIVITY_TIMEOUT_S) );
 
@@ -171,7 +176,7 @@ bool start_wifi_sta()
 	}
 
 	ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
+	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
 	if (badge_obj.sta_enterprise) {
 		sta_apply_enterprise();
 	}
@@ -184,7 +189,6 @@ bool start_wifi_sta()
 	if (bits & CONNECTED_BIT) {
 		ESP_LOGI(TAG, "WIFI_MODE_STA connected. SSID:%s password:%s",
 			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
-        schedule_sync_handler(true);
 	} else {
 		ESP_LOGI(TAG, "WIFI_MODE_STA can't connected. SSID:%s password:%s",
 			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
@@ -229,8 +233,8 @@ bool start_wifi_apsta()
 
 
 	ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_APSTA) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_AP, &ap_config) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &sta_config) );
+	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_AP, &ap_config) );
+	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &sta_config) );
 	if (badge_obj.sta_enterprise) {
 		sta_apply_enterprise();
 	}
@@ -245,7 +249,6 @@ bool start_wifi_apsta()
 	if (bits & CONNECTED_BIT) {
 		ESP_LOGI(TAG, "WIFI_MODE_STA connected. SSID:%s password:%s",
 			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
-        schedule_sync_handler(true);
 	} else {
 		ESP_LOGI(TAG, "WIFI_MODE_STA can't connected. SSID:%s password:%s",
 			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
@@ -264,32 +267,110 @@ void stop_wifi(){
     esp_wifi_disconnect();
     esp_wifi_stop();
     esp_wifi_set_mode(WIFI_MODE_NULL);
+    curr_mode = WIFI_MODE_NULL;
     ESP_LOGI(TAG, "WIFI disabled");
 	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
+}
+
+// Latest scan result, shared with the UI task.
+static wifi_ap_record_t ap_snapshot[WIFI_SCAN_MAX];
+static uint8_t ap_count = 0;
+static SemaphoreHandle_t scan_mutex = NULL;
+
+uint8_t wifi_get_scan(wifi_ap_record_t *out, uint8_t max)
+{
+	uint8_t n = 0;
+	if (scan_mutex && xSemaphoreTake(scan_mutex, pdMS_TO_TICKS(100))) {
+		n = ap_count < max ? ap_count : max;
+		memcpy(out, ap_snapshot, n * sizeof(*out));
+		xSemaphoreGive(scan_mutex);
+	}
+	return n;
+}
+
+// Non-blocking: WIFI_EVENT_SCAN_DONE posts EVENT_SCAN_DONE, so wifi_task keeps serving
+// the queue (AP/STA start) while the radio scans.
+static bool wifi_scan_begin(void)
+{
+	wifi_scan_config_t cfg = {
+		.show_hidden = true,
+		.scan_type = WIFI_SCAN_TYPE_ACTIVE,
+		.scan_time.active.min = 50,
+		.scan_time.active.max = 100,
+	};
+	if (esp_wifi_scan_start(&cfg, false) != ESP_OK) {
+		ESP_LOGW(TAG, "Wi-Fi scan start failed");
+		return false;
+	}
+	return true;
+}
+
+static void wifi_scan_collect(void)
+{
+	static wifi_ap_record_t recs[WIFI_SCAN_MAX];
+	uint16_t n = WIFI_SCAN_MAX;
+	if (esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK) {   // IDF returns them strongest first
+		ESP_LOGW(TAG, "Wi-Fi scan failed");
+		return;
+	}
+	xSemaphoreTake(scan_mutex, portMAX_DELAY);
+	memcpy(ap_snapshot, recs, n * sizeof(*recs));
+	ap_count = n;
+	xSemaphoreGive(scan_mutex);
 }
 
 void wifi_task(void *arg)
 {   
     wifi_queue = xQueueCreate(4, sizeof(uint32_t));
+    scan_mutex = xSemaphoreCreateMutex();
     uint32_t wifi_event;
+    bool scanning = false;       // scan screen is shown
+    bool scan_running = false;   // a scan is in flight, waiting for EVENT_SCAN_DONE
 
     while (1) {
-        if(!xQueueReceive(wifi_queue, &wifi_event, portMAX_DELAY))
+        if(!xQueueReceive(wifi_queue, &wifi_event, scanning ? pdMS_TO_TICKS(500) : portMAX_DELAY)) {
+            if (scanning && !scan_running) scan_running = wifi_scan_begin();
             continue;
+        }
         
         switch (wifi_event) {
             case EVENT_HOTSPOT_START:
+                scanning = scan_running = false;
                 stop_wifi();
                 start_wifi_ap();
 				esp_timer_start_once(inactivity_timer, AP_INACTIVITY_TIMEOUT_S * 1000000);
                 break;
             case EVENT_STA_START:
+                scanning = scan_running = false;
                 stop_wifi();
                 start_wifi_sta();
 				retry_num = 0;
                 break;
-            case EVENT_SYNC_START:
-				schedule_sync_handler(true);
+            case EVENT_SCAN_START:
+                if (curr_mode == WIFI_MODE_NULL) {   // never disturb an active AP/STA
+                    xSemaphoreTake(scan_mutex, portMAX_DELAY);
+                    ap_count = 0;
+                    xSemaphoreGive(scan_mutex);
+                    if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK && esp_wifi_start() == ESP_OK) {
+                        curr_mode = WIFI_MODE_STA;
+                        scanning = true;
+                        scan_running = wifi_scan_begin();
+                    } else {
+                        ESP_LOGW(TAG, "Wi-Fi scan start failed");
+                        stop_wifi();
+                    }
+                }
+                break;
+            case EVENT_SCAN_STOP:
+                if (scanning) {
+                    scanning = scan_running = false;
+                    stop_wifi();
+                }
+                break;
+            case EVENT_SCAN_DONE:
+                scan_running = false;
+                if (scanning) wifi_scan_collect();
+                else esp_wifi_clear_ap_list();   // free the list of a scan nobody wants
                 break;
             case EVENT_HOTSPOT_STOP:
             case EVENT_STA_STOP:

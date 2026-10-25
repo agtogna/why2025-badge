@@ -1,7 +1,8 @@
 #include "ui.h"
+#include "driver/usb_serial_jtag.h"
 #include "led.h"
 
-enum screen_order {SCREEN_LOGO, SCREEN_EVENT, SCREEN_RADAR, SCREEN_RSSI,  SCREEN_ADMIN, SCREEN_SNAKE, SCREEN_INVADERS, SCREEN_RAINBOW, NUM_SCREENS};
+enum screen_order {SCREEN_LOGO, SCREEN_RADAR, SCREEN_RSSI, SCREEN_WIFI, SCREEN_ADMIN, SCREEN_SNAKE, SCREEN_RAINBOW, NUM_SCREENS};
 static lv_obj_t* screens[NUM_SCREENS];
 static int8_t current_screen = SCREEN_LOGO;
 
@@ -9,9 +10,9 @@ static uint32_t last_trigger = -1;
 
 static lv_obj_t *radar_node[MAX_NEARBY_NODE] = {0};
 static lv_obj_t *radar_node_number[MAX_NEARBY_NODE] = {0};
-static lv_obj_t *table_rssi, *table_event;
-static lv_obj_t *admin_switch, *admin_switch_sta, *admin_sync;
-static lv_obj_t *admin_switch_text, *admin_switch_sta_text, *admin_sync_text;
+static lv_obj_t *table_rssi, *table_wifi;
+static lv_obj_t *admin_switch, *admin_switch_sta;
+static lv_obj_t *admin_switch_text, *admin_switch_sta_text;
 static lv_obj_t *admin_ssid, *admin_pass;
 static lv_obj_t *admin_client_ip, *admin_gateway_ip;
 static lv_obj_t *rainbow_label;
@@ -21,39 +22,29 @@ static bool sta_connected = false;
 
 static uint8_t admin_state = ADMIN_STATE_OFF;
 
+// Screen objects and task handles declared extern in ui.h
+lv_obj_t *screen_logo;
+lv_obj_t *screen_radar;
+lv_obj_t *screen_rssi;
+lv_obj_t *screen_wifi;
+lv_obj_t *screen_snake;
+lv_obj_t *screen_admin;
+lv_obj_t *screen_rainbow;
+lv_task_t* snake_task_handle;
+lv_task_t* radar_task_handle;
+lv_task_t* rssi_task_handle;
+lv_task_t* wifi_scan_task_handle;
+lv_task_t* backlight_task_handle;
+
 static uint8_t up_button_press_counter = 0;
 static uint8_t down_button_press_counter = 0;
 static int8_t counter_screen = -1; // Initialize to invalid screen index
 
-// Event schedule pagination. The schedule can hold many entries; the display
-// loads only one page at a time (streamed from the file) to bound memory.
-#define SCHEDULE_MAX_ROWS  400   // hard safety cap on entries scanned
-#define EVENT_ROW_BUF      768   // max bytes of one schedule row object
-
-// Sorted display order. The schedule file is stored in feed order, so we build
-// a compact index (per entry: its "sort" key YYYYMMDDHHMM and its rank in
-// day-then-time order), then stream-fill the table with every entry placed at
-// its sorted rank. Bounded RAM (no whole-file DOM); the whole list is one
-// scrollable table.
-// Allocated (SCHEDULE_MAX_ROWS entries) only while the schedule is loaded, and
-// freed together with the table on ui_event_unload() so AP/STA get the heap.
-static uint64_t *sched_keys = NULL;   // key per file-order index
-static uint16_t *sched_rank = NULL;   // file-order index -> sorted rank
-static int      sched_total = 0;
-static bool     sched_index_valid = false;
-static bool     event_loaded = false;            // table built lazily on first view
-
-static int cmp_sched_order(const void* a, const void* b) {
-    uint64_t ka = sched_keys[*(const uint16_t*)a];
-    uint64_t kb = sched_keys[*(const uint16_t*)b];
-    return (ka > kb) - (ka < kb);
-}
-
 // Forward declarations
 void ui_update_ip_info(void);
 void ui_list_all_netifs(void);
-static void ui_event_unload(void);
 static void ui_rainbow_next(void);
+static void ui_wifi_scan(bool on);
 
 void restore_current_task(){
     if(current_screen == SCREEN_RSSI){
@@ -61,6 +52,10 @@ void restore_current_task(){
     }
     else if(current_screen == SCREEN_RADAR){
         lv_task_set_prio(radar_task_handle, LV_TASK_PRIO_LOW);
+    }
+    else if(current_screen == SCREEN_WIFI){
+        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_LOW);
+        ui_wifi_scan(admin_state == ADMIN_STATE_OFF);
     }
 }
 
@@ -70,6 +65,10 @@ void pause_current_task(){
     }
     else if(current_screen == SCREEN_RADAR){
         lv_task_set_prio(radar_task_handle, LV_TASK_PRIO_OFF);
+    }
+    else if(current_screen == SCREEN_WIFI){
+        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_OFF);
+        ui_wifi_scan(false);
     }
 }
 
@@ -81,6 +80,23 @@ void pause_current_task(){
 static bool ui_update_backlight(bool trigger)
 {
     uint32_t span = lv_tick_get() - last_trigger;
+
+    // On USB power: dim after USB_DIM_TIMEOUT_MS, never switch off.
+    // shortcut: "power" = USB host enumerated (usb_serial_jtag_is_connected); a plain
+    // charger/power bank is not detected, add a VBUS sense pin if that is needed.
+    static int8_t usb_dimmed = -1;   // -1: not on USB; the first USB pass always applies
+    if (trigger || !usb_serial_jtag_is_connected())
+        usb_dimmed = -1;
+    else
+    {
+        bool dim = span > USB_DIM_TIMEOUT_MS;
+        if (dim != usb_dimmed) {
+            usb_dimmed = dim;
+            set_screen_led_backlight(dim ? badge_obj.brightness_mid : badge_obj.brightness_max);
+            restore_current_task();   // may have been paused if the screen was off before plugging in
+        }
+        return false;
+    }
 
     if (trigger)
     {
@@ -110,6 +126,15 @@ static bool ui_update_backlight(bool trigger)
 void ui_send_wifi_event(int event)
 {
     xQueueSend(wifi_queue, &event, portMAX_DELAY);
+}
+
+// Ask wifi_task to start/stop scanning; only sends on a state change.
+static void ui_wifi_scan(bool on)
+{
+    static bool requested = false;
+    if (on == requested) return;
+    requested = on;
+    ui_send_wifi_event(on ? EVENT_SCAN_START : EVENT_SCAN_STOP);
 }
 
 void scroll_up(lv_obj_t *screen){
@@ -162,23 +187,19 @@ void ui_button_up()
             lv_task_set_prio(snake_task_handle, LV_TASK_PRIO_LOW);
             snake_set_dir(1);
             break;
-        case SCREEN_INVADERS:
-            invaders_move_cannon(-1);   // UP -> move cannon left
-            break;
         case SCREEN_RAINBOW:
             ui_rainbow_next();          // any short press -> next animation
             break;
         case SCREEN_ADMIN:
             switch(admin_state){
                 case ADMIN_STATE_OFF: // AP and STA disabled: enable AP
-                    ui_event_unload();   // free schedule table -> heap for AP + web server
                     ui_send_wifi_event(EVENT_HOTSPOT_START);
                     lv_obj_set_hidden(admin_switch_sta, true);
                     admin_state = ADMIN_STATE_AP;
                     break;
                 case ADMIN_STATE_AP: // AP enabled: disable AP
                     ui_send_wifi_event(EVENT_HOTSPOT_STOP);
-                    lv_obj_set_hidden(admin_switch_sta, false);
+                    lv_obj_set_hidden(admin_switch_sta, !UI_STA_ENABLED);
                     lv_obj_set_hidden(admin_ssid, true);
                     admin_state = ADMIN_STATE_OFF;
                     break;
@@ -190,8 +211,8 @@ void ui_button_up()
                     break;
             }   
             break;
-        case SCREEN_EVENT:
         case SCREEN_RSSI:
+        case SCREEN_WIFI:
             scroll_up(screens[current_screen]);
             break;
         default:
@@ -235,32 +256,29 @@ void ui_button_down()
             lv_task_set_prio(snake_task_handle, LV_TASK_PRIO_LOW);
             snake_set_dir(-1);
             break;
-        case SCREEN_INVADERS:
-            invaders_move_cannon(1);    // DOWN -> move cannon right
-            break;
         case SCREEN_RAINBOW:
             ui_rainbow_next();          // any short press -> next animation
             break;
         case SCREEN_ADMIN:
             switch(admin_state){
                 case ADMIN_STATE_OFF: // AP and STA disabled: enable STA
-                    ui_event_unload();   // free schedule table -> heap for TLS sync
+#if UI_STA_ENABLED
                     ui_send_wifi_event(EVENT_STA_START);
                     lv_label_set_text(admin_switch_sta_text, "Started...");
                     admin_state = ADMIN_STATE_STA;
+#endif
                     break;
                 case ADMIN_STATE_AP: // AP enabled: test showing IP labels
                     ESP_LOGI("UI", "Force show IP labels test (DOWN button in AP mode)");
                     ui_force_show_ip_labels();
                     break;
-                case ADMIN_STATE_STA: // STA mode: test showing IP labels  
-                    ESP_LOGI("UI", "Force show IP labels test (DOWN button in STA mode)");
-                    ui_force_show_ip_labels();
+                case ADMIN_STATE_STA: // STA enabled: disable STA
+                    ui_send_wifi_event(EVENT_STA_STOP);
                     break;
             }
             break;
-        case SCREEN_EVENT:
         case SCREEN_RSSI:
+        case SCREEN_WIFI:
             scroll_down(screens[current_screen]);
             break;
         default:
@@ -268,225 +286,41 @@ void ui_button_down()
     }
 }
 
-// Set a table cell WITHOUT triggering a relayout (unlike lv_table_set_cell_value,
-// which calls refr_size on every call -> O(n^2) when filling a large table). The
-// caller must trigger a single relayout afterwards (lv_table_set_row_cnt). The
-// format byte 0 == left-aligned, no merge/crop, matching the default cells.
-static void event_set_cell(int row, int col, const char* txt)
+static void ui_wifi_task(lv_task_t *arg)
 {
-    lv_table_ext_t *ext = lv_obj_get_ext_attr(table_event);
-    uint32_t cell = (uint32_t)row * ext->col_cnt + col;
-    char *p = lv_mem_realloc(ext->cell_data[cell], strlen(txt) + 2);  // +format byte +'\0'
-    if (!p) return;
-    p[0] = 0;
-    strcpy(p + 1, txt);
-    ext->cell_data[cell] = p;
-}
-
-// Fill one 2-cell table row from a parsed schedule item (NULL-safe).
-static void event_fill_row(cJSON* item, int row)
-{
-    char buff[256];
-    cJSON *title    = cJSON_GetObjectItem(item, "title");
-    cJSON *day      = cJSON_GetObjectItem(item, "day");
-    cJSON *hour     = cJSON_GetObjectItem(item, "hour");
-    cJSON *speaker  = cJSON_GetObjectItem(item, "speaker");
-    cJSON *location = cJSON_GetObjectItem(item, "location");
-    cJSON *duration = cJSON_GetObjectItem(item, "duration");
-
-    buff[0] = '\0';
-    if (cJSON_IsString(day) && strlen(day->valuestring) > 0)
-        snprintf(buff, sizeof(buff), "Day: %s\n", day->valuestring);
-    if (cJSON_IsString(hour) && strlen(hour->valuestring) > 0)
-        snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff), "Time: %s\n", hour->valuestring);
-    if (cJSON_IsString(location) && strlen(location->valuestring) > 0)
-        snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff), "Where: %s\n", location->valuestring);
-    if (cJSON_IsString(duration) && strlen(duration->valuestring) > 0)
-        snprintf(buff + strlen(buff), sizeof(buff) - strlen(buff), "How long: %s", duration->valuestring);
-    event_set_cell(row, 0, buff);
-
-    snprintf(buff, sizeof(buff), "%s\nby %s",
-             cJSON_IsString(title)   ? title->valuestring   : "",
-             cJSON_IsString(speaker) ? speaker->valuestring : "");
-    event_set_cell(row, 1, buff);
-}
-
-// Open the schedule file and advance past the '[' that starts the schedule
-// array (the "info" field is base64, so it contains no '['). Returns NULL on
-// error or if no array is present.
-static FILE* schedule_open_array(void)
-{
-    FILE* fp = fopen(SCHEDULE_FILE, "r");
-    if (!fp) { ESP_LOGI(__FILE__, "Failed to open schedule file"); return NULL; }
-    int c;
-    while ((c = fgetc(fp)) != EOF && c != '[') { }
-    if (c == EOF) { fclose(fp); ESP_LOGI(__FILE__, "No schedule array found"); return NULL; }
-    return fp;
-}
-
-// Build the sorted display index: scan the file once, read each entry's "sort"
-// key, and rank entries in ascending (day-then-time) order. Cached until the
-// schedule is replaced (ui_schedule_reset).
-static void ui_schedule_build_index(void)
-{
-    sched_total = 0;
-    if (!sched_keys) sched_keys = malloc(SCHEDULE_MAX_ROWS * sizeof(*sched_keys));
-    if (!sched_rank) sched_rank = malloc(SCHEDULE_MAX_ROWS * sizeof(*sched_rank));
-    if (!sched_keys || !sched_rank) {
-        ESP_LOGE(__FILE__, "Cannot allocate schedule sort index");
-        sched_index_valid = true;   // avoid retry loop; renders as empty
-        return;
-    }
-    FILE* fp = schedule_open_array();
-    if (!fp) { sched_index_valid = true; return; }
-
-    int c, blen = 0, depth = 0;
-    bool overflow = false, in_str = false, esc = false, in_obj = false;
-    char buf[EVENT_ROW_BUF];
-
-    while ((c = fgetc(fp)) != EOF) {
-        char ch = (char)c;
-        if (!in_obj) {
-            if (ch == '{') { in_obj = true; depth = 1; blen = 0; overflow = false;
-                             in_str = false; esc = false; buf[blen++] = '{'; }
-            else if (ch == ']') break;
-            continue;
-        }
-        if (!overflow) { if (blen < EVENT_ROW_BUF - 1) buf[blen++] = ch; else overflow = true; }
-        if (in_str) {
-            if (esc) esc = false; else if (ch == '\\') esc = true; else if (ch == '"') in_str = false;
-        } else if (ch == '"') { in_str = true; }
-        else if (ch == '{' || ch == '[') { depth++; }
-        else if (ch == '}' || ch == ']') {
-            if (--depth == 0) {
-                in_obj = false;
-                uint64_t key = 0;
-                if (!overflow) {
-                    buf[blen] = '\0';
-                    // "sort" is the first field of each row; read it textually
-                    // to avoid a full cJSON parse per entry in this index pass.
-                    char* p = strstr(buf, "\"sort\":\"");
-                    if (p) key = strtoull(p + 8, NULL, 10);
-                }
-                if (sched_total < SCHEDULE_MAX_ROWS) sched_keys[sched_total++] = key;
-                else break;
-            }
-        }
-    }
-    fclose(fp);
-
-    // Sort a temporary index array by key, then invert to file-order -> rank.
-    uint16_t *order = malloc(sched_total * sizeof(*order));
-    if (order) {
-        for (int i = 0; i < sched_total; i++) order[i] = (uint16_t)i;
-        qsort(order, sched_total, sizeof(*order), cmp_sched_order);
-        for (int i = 0; i < sched_total; i++) sched_rank[order[i]] = (uint16_t)i;
-        free(order);
-    } else {
-        for (int i = 0; i < sched_total; i++) sched_rank[i] = (uint16_t)i;  // unsorted fallback
-    }
-
-    sched_index_valid = true;
-    ESP_LOGI(__FILE__, "Schedule index built: %d entries", sched_total);
-}
-
-// Invalidate the cached sort index and mark the table stale so it is rebuilt
-// the next time the event screen is opened. Called after a sync replaces the
-// file (cheap; the actual rebuild is deferred off the sync path).
-void ui_schedule_reset(void)
-{
-    sched_index_valid = false;
-    event_loaded = false;
-}
-
-// Free the schedule table's cells to reclaim ~50 KB of heap for Wi-Fi (AP web
-// server / TLS sync). The table is rebuilt lazily the next time the event
-// screen is opened (ui_prepare_current_screen). Only called while the event
-// screen is inactive (from the admin screen), so freeing it is safe.
-static void ui_event_unload(void)
-{
-    if (!event_loaded) return;
-
-    // Free the per-cell strings directly. lv_table_set_row_cnt(t,0) frees only
-    // the pointer array, not the strings (LVGL v7) -> leaks ~30 KB otherwise.
-    // We must NOT clear cells via lv_table_set_cell_value("") because each call
-    // triggers a full table relayout (re-measuring every row) -> ~O(n^2), which
-    // froze the UI for ~15 s on a 142-row schedule. Freeing cell_data directly
-    // is a single O(n) pass with no relayout.
-    lv_table_ext_t *ext = lv_obj_get_ext_attr(table_event);
-    if (ext && ext->cell_data) {
-        uint32_t n = (uint32_t)ext->row_cnt * ext->col_cnt;
-        for (uint32_t i = 0; i < n; i++) {
-            if (ext->cell_data[i]) { lv_mem_free(ext->cell_data[i]); ext->cell_data[i] = NULL; }
-        }
-    }
-    lv_table_set_row_cnt(table_event, 0);   // frees the pointer array (one relayout)
-
-    // Also free the sort index; it is rebuilt with the table on next view.
-    free(sched_keys); sched_keys = NULL;
-    free(sched_rank); sched_rank = NULL;
-    sched_index_valid = false;
-
-    event_loaded = false;
-    ESP_LOGI(__FILE__, "Freed event table; free_heap=%lu", esp_get_free_heap_size());
-}
-
-// Load the whole schedule into table_event in sorted (day-then-time) order, as
-// one scrollable list. Streams the file and parses one entry at a time (no
-// whole-file DOM), placing each at its sorted rank.
-void ui_event_load()
-{
-    if (!sched_index_valid) ui_schedule_build_index();
-    event_loaded = true;
-    const int total = sched_total;
-
-    lv_table_set_row_cnt(table_event, total > 0 ? total : 1);
-    if (total == 0) {
-        lv_table_set_cell_value(table_event, 0, 0, "No schedule");
-        lv_table_set_cell_value(table_event, 0, 1, "");
+    if (lv_scr_act() != screen_wifi)
+    {
+        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_OFF);
         return;
     }
 
-    FILE* fp = schedule_open_array();
-    if (!fp) return;
+    static wifi_ap_record_t aps[WIFI_SCAN_MAX];
+    const uint8_t count = (admin_state == ADMIN_STATE_OFF) ? wifi_get_scan(aps, WIFI_SCAN_MAX) : 0;
 
-    int c, obj_index = 0, filled = 0, blen = 0, depth = 0;
-    bool overflow = false, in_str = false, esc = false, in_obj = false;
-    char buf[EVENT_ROW_BUF];
-
-    while ((c = fgetc(fp)) != EOF) {
-        char ch = (char)c;
-        if (!in_obj) {
-            if (ch == '{') { in_obj = true; depth = 1; blen = 0; overflow = false;
-                             in_str = false; esc = false; buf[blen++] = '{'; }
-            else if (ch == ']') break;
-            continue;
-        }
-        if (!overflow) { if (blen < EVENT_ROW_BUF - 1) buf[blen++] = ch; else overflow = true; }
-        if (in_str) {
-            if (esc) esc = false; else if (ch == '\\') esc = true; else if (ch == '"') in_str = false;
-        } else if (ch == '"') { in_str = true; }
-        else if (ch == '{' || ch == '[') { depth++; }
-        else if (ch == '}' || ch == ']') {
-            if (--depth == 0) {
-                in_obj = false;
-                int rank = (obj_index < SCHEDULE_MAX_ROWS) ? sched_rank[obj_index] : -1;
-                if (!overflow && rank >= 0 && rank < total) {
-                    buf[blen] = '\0';
-                    cJSON* item = cJSON_Parse(buf);
-                    if (item) { event_fill_row(item, rank); cJSON_Delete(item); filled++; }
-                }
-                if (++obj_index >= SCHEDULE_MAX_ROWS) break;
-            }
-        }
+    lv_table_set_row_cnt(table_wifi, (count ? count : 1) + 1);
+    if (count == 0) {
+        lv_table_set_cell_value(table_wifi, 1, 0, admin_state == ADMIN_STATE_OFF ? "Scanning..." : "Turn off AP/STA");
+        lv_table_set_cell_value(table_wifi, 1, 1, "");
+        lv_table_set_cell_value(table_wifi, 1, 2, "");
+        return;
     }
-    fclose(fp);
 
-    // Cells were filled directly (no per-cell relayout); trigger ONE relayout
-    // now to compute row heights over the full table (no-op realloc, same count).
-    lv_table_set_row_cnt(table_event, total);
+    char buf[40];
+    for (int i = 0; i < count; i++) {
+        const int row = i + 1;
+        const char* ssid = (const char*)aps[i].ssid;
+        snprintf(buf, sizeof(buf), "%.14s", ssid[0] ? ssid : "<hidden>");
+        lv_table_set_cell_value(table_wifi, row, 0, buf);
 
-    ESP_LOGI(__FILE__, "Schedule loaded: %d/%d rows (sorted)", filled, total);
+        snprintf(buf, sizeof(buf), "%d", aps[i].primary);
+        lv_table_set_cell_value(table_wifi, row, 1, buf);
+        lv_table_set_cell_align(table_wifi, row, 1, LV_LABEL_ALIGN_CENTER);
+
+        const int rssi = aps[i].rssi;
+        const int bars = rssi > -55 ? 5 : rssi > -65 ? 4 : rssi > -75 ? 3 : rssi > -85 ? 2 : 1;
+        snprintf(buf, sizeof(buf), "%d %.*s%.*s", rssi, bars, "#####", 5 - bars, ".....");
+        lv_table_set_cell_value(table_wifi, row, 2, buf);
+    }
 }
 
 static void ui_rssi_task(lv_task_t *arg)
@@ -604,44 +438,6 @@ static void ui_radar_task(lv_task_t *arg)
     }
 }
 
-void ui_screen_event_init() {
-    // page for event
-    static lv_style_t style;
-    lv_style_init(&style);
-
-    screen_event = lv_obj_create(NULL, NULL);
-    lv_obj_t *screen_event_page = lv_page_create(screen_event, NULL);
-
-    lv_obj_t *scrollable = lv_page_get_scrollable(screen_event_page);
-    lv_cont_set_layout(scrollable, LV_LAYOUT_PRETTY_TOP);
-    lv_obj_set_style_local_pad_all(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-	lv_obj_set_style_local_pad_inner(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_all(screen_event_page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_inner(screen_event_page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_page_set_scrollbar_mode(screen_event_page, LV_SCROLLBAR_MODE_OFF);
-
-    lv_obj_set_size(screen_event_page, LV_HOR_RES, LV_VER_RES);
-    lv_coord_t content_w = lv_obj_get_width_grid(screen_event_page, 2, 1);
-
-    lv_style_set_text_font(&style, LV_OBJ_PART_MAIN, &lv_font_montserrat_14);
-
-    table_event = lv_table_create(screen_event_page, NULL);
-    lv_obj_clean_style_list(table_event, LV_TABLE_PART_BG);
-    lv_obj_set_drag_parent(table_event, true);
-    lv_table_set_col_cnt(table_event, 2);
-    lv_table_set_col_width(table_event, 0, 4*(2 * content_w)/10);
-    lv_table_set_col_width(table_event, 1, 6*(2 * content_w)/10);
-    lv_obj_add_style(table_event, LV_OBJ_PART_MAIN, &style);
-
-    lv_obj_align(table_event, screen_event_page, LV_ALIGN_OUT_TOP_LEFT, 0, 0);
-
-    // Load the full schedule now, during init (before the logo is shown), so
-    // the badge does its heavy loading up front and the UI is responsive after.
-    ui_event_load();
-
-    screens[SCREEN_EVENT] = screen_event;
-}
-
 void ui_screen_splash_init(){
     LV_IMG_DECLARE(img_logo);
 
@@ -679,6 +475,45 @@ void ui_screen_radar_init(){
     }
 
     screens[SCREEN_RADAR] = screen_radar;
+}
+
+void ui_screen_wifi_init(){
+    static lv_style_t style;
+    lv_style_init(&style);
+
+    screen_wifi = lv_obj_create(NULL, NULL);
+    lv_obj_t *page = lv_page_create(screen_wifi, NULL);
+
+    lv_obj_t *scrollable = lv_page_get_scrollable(page);
+    lv_cont_set_layout(scrollable, LV_LAYOUT_PRETTY_TOP);
+    lv_obj_set_style_local_pad_all(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+    lv_obj_set_style_local_pad_inner(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
+    lv_obj_set_style_local_pad_all(page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
+    lv_obj_set_style_local_pad_inner(page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
+    lv_page_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES);
+    lv_coord_t content_w = lv_obj_get_width_grid(page, 3, 1);
+
+    lv_style_set_text_font(&style, LV_OBJ_PART_MAIN, &lv_font_montserrat_14);
+
+    table_wifi = lv_table_create(page, NULL);
+    lv_obj_clean_style_list(table_wifi, LV_TABLE_PART_BG);
+    lv_obj_set_drag_parent(table_wifi, true);
+    lv_table_set_col_cnt(table_wifi, 3);
+    lv_table_set_col_width(table_wifi, 0, 14 * content_w / 10);
+    lv_table_set_col_width(table_wifi, 1, 5 * content_w / 10);
+    lv_table_set_col_width(table_wifi, 2, 11 * content_w / 10);
+    lv_obj_add_style(table_wifi, LV_OBJ_PART_MAIN, &style);
+
+    lv_obj_align(table_wifi, page, LV_ALIGN_OUT_TOP_LEFT, 0, 0);
+
+    lv_table_set_cell_value(table_wifi, 0, 0, "SSID");
+    lv_table_set_cell_value(table_wifi, 0, 1, "CH");
+    lv_table_set_cell_value(table_wifi, 0, 2, "dBm");
+    lv_table_set_cell_align(table_wifi, 0, 1, LV_LABEL_ALIGN_CENTER);
+
+    screens[SCREEN_WIFI] = screen_wifi;
 }
 
 void ui_screen_rssi_init(){
@@ -733,13 +568,6 @@ void ui_screen_admin_init(){
     admin_switch_text = lv_label_create(admin_switch, NULL);
     lv_label_set_text(admin_switch_text, "TURN ON AP");
 
-    admin_sync = lv_btn_create(screen_admin, NULL);
-    lv_obj_set_size(admin_sync, 200, 50);
-    lv_obj_set_pos(admin_sync, 60, 180);
-    admin_sync_text = lv_label_create(admin_sync, NULL);
-    lv_label_set_text(admin_sync_text, "FORCE SCHEDULE SYNC");
-    lv_obj_set_hidden(admin_sync, true);
-
     admin_ssid = lv_label_create(screen_admin, NULL);
     lv_obj_align(admin_ssid, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 10);
     lv_obj_set_hidden(admin_ssid, true);
@@ -760,7 +588,8 @@ void ui_screen_admin_init(){
     lv_obj_set_size(admin_switch_sta, 200, 50);
     lv_obj_set_pos(admin_switch_sta, 60, 180);
     admin_switch_sta_text = lv_label_create(admin_switch_sta, NULL);
-    lv_label_set_text(admin_switch_sta_text, "SYNC SCHEDULE");
+    lv_obj_set_hidden(admin_switch_sta, !UI_STA_ENABLED);
+    lv_label_set_text(admin_switch_sta_text, "WIFI STA");
 
     screens[SCREEN_ADMIN] = screen_admin;
 }
@@ -771,16 +600,6 @@ void ui_screen_snake_init(){
     snake_reset(screen_snake);
 
     screens[SCREEN_SNAKE] = screen_snake;
-}
-
-void ui_screen_invaders_init(){
-    // page for space invaders (black "space" background)
-    screen_invaders = lv_obj_create(NULL, NULL);
-    lv_obj_set_style_local_bg_color(screen_invaders, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_BLACK);
-    lv_obj_set_style_local_bg_opa(screen_invaders, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
-    invaders_reset(screen_invaders);
-
-    screens[SCREEN_INVADERS] = screen_invaders;
 }
 
 // Refresh the rainbow screen's label to the currently active animation's
@@ -812,7 +631,7 @@ void ui_screen_rainbow_init(){
     screens[SCREEN_RAINBOW] = screen_rainbow;
 }
 
-void ui_ap_start_handler() {
+void ui_ap_start_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     ap_started = true;
 
     ESP_LOGI("UI", "AP started handler called");
@@ -837,7 +656,7 @@ void ui_ap_start_handler() {
     admin_state = ADMIN_STATE_AP;
 }
 
-void ui_ap_stop_handler(){
+void ui_ap_stop_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     ap_started = false;
 
     lv_label_set_text(admin_switch_text, "TURN ON AP");
@@ -845,13 +664,13 @@ void ui_ap_stop_handler(){
     lv_obj_set_hidden(admin_pass, true);
     lv_obj_set_hidden(admin_client_ip, true);
     lv_obj_set_hidden(admin_gateway_ip, true);
-    lv_obj_set_hidden(admin_switch_sta, false);
+    lv_obj_set_hidden(admin_switch_sta, !UI_STA_ENABLED);
 
     lv_btn_set_state(admin_switch, LV_BTN_STATE_RELEASED);//enabl(admin_switch);
     admin_state = ADMIN_STATE_OFF;
 }
 
-void ui_sta_connected_handler(){
+void ui_sta_connected_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     sta_connected = true;
 
     ESP_LOGI("UI", "STA connected handler called");
@@ -859,7 +678,7 @@ void ui_sta_connected_handler(){
     ESP_LOGI("UI", "Current screen: %d", current_screen);
     
     lv_btn_set_state(admin_switch_sta, LV_BTN_STATE_CHECKED_PRESSED);
-    lv_label_set_text(admin_switch_sta_text, "Downloading...");
+    lv_label_set_text(admin_switch_sta_text, "Connected (DOWN: stop)");
     
     // Update IP information when connected as station immediately
     ESP_LOGI("UI", "About to call ui_update_ip_info from STA connected handler");
@@ -872,7 +691,7 @@ void ui_sta_connected_handler(){
     admin_state = ADMIN_STATE_STA;
 }
 
-void ui_sta_disconnected_handler(){
+void ui_sta_disconnected_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     sta_connected = false;
     lv_btn_set_state(admin_switch_sta, LV_BTN_STATE_RELEASED);
     lv_obj_set_hidden(admin_client_ip, true);
@@ -880,9 +699,9 @@ void ui_sta_disconnected_handler(){
     admin_state = ADMIN_STATE_OFF;
 }
 
-void ui_sta_stop_handler() {
+void ui_sta_stop_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     sta_connected = false;
-    lv_label_set_text(admin_switch_sta_text, "SYNC SCHEDULE");
+    lv_label_set_text(admin_switch_sta_text, "WIFI STA");
     lv_obj_set_hidden(admin_client_ip, true);
     lv_obj_set_hidden(admin_gateway_ip, true);
     admin_state = ADMIN_STATE_OFF;
@@ -898,11 +717,6 @@ void ui_connection_progress(uint8_t cur, uint8_t max){
         lv_label_set_text(admin_switch_sta_text, "Connection failed!");
         lv_obj_set_hidden(admin_switch_sta_text, false);
     }
-}
-
-void ui_toggle_sync(){
-    lv_btn_set_state(admin_sync, LV_BTN_STATE_RELEASED);
-    ui_send_wifi_event(EVENT_STA_STOP);
 }
 
 void ui_update_ip_info() {
@@ -987,7 +801,7 @@ void ui_update_ip_info() {
     ESP_LOGI("UI", "Primary methods failed, trying to iterate through all interfaces...");
     
     esp_netif_t *netif = NULL;
-    esp_netif_t *temp_netif = esp_netif_next(netif);
+    esp_netif_t *temp_netif = esp_netif_next_unsafe(netif);
     bool ip_found = false;
     
     while (temp_netif != NULL && !ip_found) {
@@ -1024,7 +838,7 @@ void ui_update_ip_info() {
             ESP_LOGI("UI", "Successfully displayed IP info from interface iteration");
         }
         
-        temp_netif = esp_netif_next(temp_netif);
+        temp_netif = esp_netif_next_unsafe(temp_netif);
     }
     
     if (!ip_found) {
@@ -1041,24 +855,22 @@ static void ui_init(void)
 {
     ui_screen_splash_init();
 
-    ui_screen_event_init();
 
     ui_screen_radar_init();
     
     ui_screen_rssi_init();
+    ui_screen_wifi_init();
 
     ui_screen_admin_init();
 
     ui_screen_snake_init();
 
-    ui_screen_invaders_init();
-
     ui_screen_rainbow_init();
 
     radar_task_handle = lv_task_create(ui_radar_task, 2000, LV_TASK_PRIO_OFF, NULL);
     rssi_task_handle = lv_task_create(ui_rssi_task, 2000, LV_TASK_PRIO_OFF, NULL);
+    wifi_scan_task_handle = lv_task_create(ui_wifi_task, 1000, LV_TASK_PRIO_OFF, NULL);
     snake_task_handle = lv_task_create(snake_task, 50, LV_TASK_PRIO_OFF, NULL);
-    invaders_task_handle = lv_task_create(invaders_task, INVADERS_TICK_MS, LV_TASK_PRIO_OFF, NULL);
 
     // show first page.
     lv_scr_load(screens[current_screen]);
@@ -1128,21 +940,11 @@ void ui_task(void *arg)
     vTaskDelete(NULL);
 }
 
-// Rebuild the event table if it was marked stale (e.g. after a sync). The
-// schedule is loaded eagerly at boot, so this is normally a no-op. Also start a
-// fresh Space Invaders game (and enable its task) on entry, and stop the game
-// task when leaving that screen. Same idea for the rainbow LED loop, except
-// that one runs on led_task (not LVGL) so entering/leaving it is just a flag.
+// Start or stop the rainbow LED loop, which runs on led_task (not LVGL), so entering or
+// leaving that screen is just a flag.
 static void ui_prepare_current_screen(void)
 {
-    if (current_screen == SCREEN_EVENT && !event_loaded) ui_event_load();
-
-    if (current_screen == SCREEN_INVADERS) {
-        invaders_reset(screen_invaders);   // fresh game; also enables the task
-    } else if (invaders_task_handle) {
-        lv_task_set_prio(invaders_task_handle, LV_TASK_PRIO_OFF);
-    }
-
+    ui_wifi_scan(current_screen == SCREEN_WIFI && admin_state == ADMIN_STATE_OFF);
     set_rainbow_loop_active(current_screen == SCREEN_RAINBOW);
     if (current_screen == SCREEN_RAINBOW) ui_rainbow_update_label(); // resets to animation 1
 }
@@ -1182,29 +984,11 @@ void button_task(void *arg)
     static QueueHandle_t button_events;
     button_events = button_init(PIN_BIT(BUTTON_1) | PIN_BIT(BUTTON_2));
 
-    static bool down_state[2] = {false, false};   // pressed state of each wheel
-    static bool fire_chord[2] = {false, false};   // this press was part of a FIRE chord
-
     while (true)
     {
         if (xQueueReceive(button_events, &curr_ev, 1000 / portTICK_PERIOD_MS))
         {
             uint8_t btn_id = curr_ev.pin - 0x08;
-
-            // Track press/release; UP and DOWN held together = FIRE (invaders).
-            if (curr_ev.event == BUTTON_DOWN)
-            {
-                down_state[btn_id] = true;
-                if (down_state[0] && down_state[1] && current_screen == SCREEN_INVADERS)
-                {
-                    invaders_fire();
-                    fire_chord[0] = fire_chord[1] = true;   // suppress the move on release
-                }
-            }
-            else if (curr_ev.event == BUTTON_UP)
-            {
-                down_state[btn_id] = false;
-            }
 
             if (curr_ev.event == BUTTON_HELD)
             {
@@ -1218,8 +1002,7 @@ void button_task(void *arg)
                 }
                 else if ((prev_ev[btn_id].event == BUTTON_DOWN) && (curr_ev.event == BUTTON_UP))
                 {
-                    if (fire_chord[btn_id]) fire_chord[btn_id] = false;   // was a fire chord, no move
-                    else ui_button_down();
+                    ui_button_down();
                 }
             }
 
@@ -1231,8 +1014,7 @@ void button_task(void *arg)
                 }
                 else if ((prev_ev[btn_id].event == BUTTON_DOWN) && (curr_ev.event == BUTTON_UP))
                 {
-                    if (fire_chord[btn_id]) fire_chord[btn_id] = false;
-                    else ui_button_up();
+                    ui_button_up();
                 }
             }
             prev_ev[btn_id] = curr_ev;
@@ -1245,7 +1027,7 @@ void ui_list_all_netifs() {
     
     // Try to iterate through all available network interfaces
     esp_netif_t *netif = NULL;
-    esp_netif_t *temp_netif = esp_netif_next(netif);
+    esp_netif_t *temp_netif = esp_netif_next_unsafe(netif);
     int count = 0;
     
     while (temp_netif != NULL) {
@@ -1264,7 +1046,7 @@ void ui_list_all_netifs() {
         ESP_LOGI("UI", "  Gateway: " IPSTR, IP2STR(&ip_info.gw));
         ESP_LOGI("UI", "  Netmask: " IPSTR, IP2STR(&ip_info.netmask));
         
-        temp_netif = esp_netif_next(temp_netif);
+        temp_netif = esp_netif_next_unsafe(temp_netif);
     }
     
     ESP_LOGI("UI", "Total network interfaces found: %d", count);

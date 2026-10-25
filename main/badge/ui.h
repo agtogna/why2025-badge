@@ -5,7 +5,11 @@
 #include <stdlib.h>
 
 #include "lvgl.h"
-#include "lvgl_helpers.h"
+#include "esp_lvgl_port.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_vendor.h"
+#include "driver/spi_master.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +24,16 @@
 
 #define BUTTON_1 0x08 // DOWN button
 #define BUTTON_2 0x09 // UP button
+
+// ST7789 display on SPI2
+#define DISP_HRES 320
+#define DISP_VRES 240
+#define DISP_BUF_PX (DISP_HRES * 40) // per LVGL draw buffer (x2)
+#define DISP_PIN_MOSI 7
+#define DISP_PIN_CLK 6
+#define DISP_PIN_CS 10
+#define DISP_PIN_DC 4
+#define DISP_PIN_RST 3
 
 #include "badge.h"
 #include "snake.h"
@@ -51,11 +65,11 @@ extern lv_obj_t *screen_snake; // page 5
 extern lv_obj_t *screen_admin; // page 4
 extern lv_obj_t *screen_rainbow;  // page 6
 
-extern lv_task_t* snake_task_handle;
-extern lv_task_t* radar_task_handle;
-extern lv_task_t* rssi_task_handle;
-extern lv_task_t* wifi_scan_task_handle;
-extern lv_task_t* backlight_task_handle;
+extern lv_timer_t* snake_task_handle;
+extern lv_timer_t* radar_task_handle;
+extern lv_timer_t* rssi_task_handle;
+extern lv_timer_t* wifi_scan_task_handle;
+extern lv_timer_t* backlight_task_handle;
 
 void ui_task(void *);
 void button_task(void *arg);

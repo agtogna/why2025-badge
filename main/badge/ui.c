@@ -30,11 +30,11 @@ lv_obj_t *screen_wifi;
 lv_obj_t *screen_snake;
 lv_obj_t *screen_admin;
 lv_obj_t *screen_rainbow;
-lv_task_t* snake_task_handle;
-lv_task_t* radar_task_handle;
-lv_task_t* rssi_task_handle;
-lv_task_t* wifi_scan_task_handle;
-lv_task_t* backlight_task_handle;
+lv_timer_t* snake_task_handle;
+lv_timer_t* radar_task_handle;
+lv_timer_t* rssi_task_handle;
+lv_timer_t* wifi_scan_task_handle;
+lv_timer_t* backlight_task_handle;
 
 static uint8_t up_button_press_counter = 0;
 static uint8_t down_button_press_counter = 0;
@@ -48,26 +48,26 @@ static void ui_wifi_scan(bool on);
 
 void restore_current_task(){
     if(current_screen == SCREEN_RSSI){
-        lv_task_set_prio(rssi_task_handle, LV_TASK_PRIO_LOW);
+        lv_timer_resume(rssi_task_handle);
     }
     else if(current_screen == SCREEN_RADAR){
-        lv_task_set_prio(radar_task_handle, LV_TASK_PRIO_LOW);
+        lv_timer_resume(radar_task_handle);
     }
     else if(current_screen == SCREEN_WIFI){
-        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_LOW);
+        lv_timer_resume(wifi_scan_task_handle);
         ui_wifi_scan(admin_state == ADMIN_STATE_OFF);
     }
 }
 
 void pause_current_task(){
     if(current_screen == SCREEN_RSSI){
-        lv_task_set_prio(rssi_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(rssi_task_handle);
     }
     else if(current_screen == SCREEN_RADAR){
-        lv_task_set_prio(radar_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(radar_task_handle);
     }
     else if(current_screen == SCREEN_WIFI){
-        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(wifi_scan_task_handle);
         ui_wifi_scan(false);
     }
 }
@@ -138,13 +138,13 @@ static void ui_wifi_scan(bool on)
 }
 
 void scroll_up(lv_obj_t *screen){
-    lv_obj_t *page = lv_obj_get_child(screen, NULL);
-    lv_page_scroll_ver(page, 80);
+    lv_obj_t *page = lv_obj_get_child(screen, 0);
+    lv_obj_scroll_by_bounded(page, 0, 80, LV_ANIM_ON);
 }
 
 void scroll_down(lv_obj_t *screen){
-    lv_obj_t *page = lv_obj_get_child(screen, NULL);
-    lv_page_scroll_ver(page, -80);
+    lv_obj_t *page = lv_obj_get_child(screen, 0);
+    lv_obj_scroll_by_bounded(page, 0, -80, LV_ANIM_ON);
 }
 
 void ui_button_up()
@@ -184,7 +184,7 @@ void ui_button_up()
 
     switch(current_screen){
         case SCREEN_SNAKE:
-            lv_task_set_prio(snake_task_handle, LV_TASK_PRIO_LOW);
+            lv_timer_resume(snake_task_handle);
             snake_set_dir(1);
             break;
         case SCREEN_RAINBOW:
@@ -253,7 +253,7 @@ void ui_button_down()
 
     switch(current_screen){
         case SCREEN_SNAKE:
-            lv_task_set_prio(snake_task_handle, LV_TASK_PRIO_LOW);
+            lv_timer_resume(snake_task_handle);
             snake_set_dir(-1);
             break;
         case SCREEN_RAINBOW:
@@ -286,18 +286,18 @@ void ui_button_down()
     }
 }
 
-static void ui_wifi_task(lv_task_t *arg)
+static void ui_wifi_task(lv_timer_t *arg)
 {
-    if (lv_scr_act() != screen_wifi)
+    if (lv_screen_active() != screen_wifi)
     {
-        lv_task_set_prio(wifi_scan_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(wifi_scan_task_handle);
         return;
     }
 
     static wifi_ap_record_t aps[WIFI_SCAN_MAX];
     const uint8_t count = (admin_state == ADMIN_STATE_OFF) ? wifi_get_scan(aps, WIFI_SCAN_MAX) : 0;
 
-    lv_table_set_row_cnt(table_wifi, (count ? count : 1) + 1);
+    lv_table_set_row_count(table_wifi, (count ? count : 1) + 1);
     if (count == 0) {
         lv_table_set_cell_value(table_wifi, 1, 0, admin_state == ADMIN_STATE_OFF ? "Scanning..." : "Turn off AP/STA");
         lv_table_set_cell_value(table_wifi, 1, 1, "");
@@ -314,7 +314,6 @@ static void ui_wifi_task(lv_task_t *arg)
 
         snprintf(buf, sizeof(buf), "%d", aps[i].primary);
         lv_table_set_cell_value(table_wifi, row, 1, buf);
-        lv_table_set_cell_align(table_wifi, row, 1, LV_LABEL_ALIGN_CENTER);
 
         const int rssi = aps[i].rssi;
         const int bars = rssi > -55 ? 5 : rssi > -65 ? 4 : rssi > -75 ? 3 : rssi > -85 ? 2 : 1;
@@ -323,16 +322,16 @@ static void ui_wifi_task(lv_task_t *arg)
     }
 }
 
-static void ui_rssi_task(lv_task_t *arg)
+static void ui_rssi_task(lv_timer_t *arg)
 {
-    if (lv_scr_act() != screen_rssi)
+    if (lv_screen_active() != screen_rssi)
     {
-        lv_task_set_prio(rssi_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(rssi_task_handle);
         return;
     }
     
     const uint8_t count = count_ble_nodes();
-    lv_table_set_row_cnt(table_rssi, count+1);
+    lv_table_set_row_count(table_rssi, count+1);
 
     char buf[BADGE_BUF_SIZE] = {0};
 
@@ -342,34 +341,31 @@ static void ui_rssi_task(lv_task_t *arg)
         if(!ble_nodes[i].active) continue;
         
         lv_table_set_cell_value(table_rssi, pos, 0, ble_nodes[i].name);
-        lv_table_set_cell_align(table_rssi, pos, 0, LV_LABEL_ALIGN_CENTER);
 
         snprintf(buf, sizeof(buf), "%d dBm", ble_nodes[i].rssi);
         lv_table_set_cell_value(table_rssi, pos, 1, buf);
-        lv_table_set_cell_align(table_rssi, pos, 1, LV_LABEL_ALIGN_CENTER);
 
         snprintf(buf, sizeof(buf), "0x0%d", ble_nodes[i].id);
         lv_table_set_cell_value(table_rssi, pos, 2, buf);
-        lv_table_set_cell_align(table_rssi, pos, 2, LV_LABEL_ALIGN_CENTER);
 
         pos++;
     }
 }
 
-static void ui_backlight_task(lv_task_t *arg){
+static void ui_backlight_task(lv_timer_t *arg){
     ui_update_backlight(false);
 }
 
-static void ui_radar_task(lv_task_t *arg)
+static void ui_radar_task(lv_timer_t *arg)
 {
 
-    if (lv_scr_act() != screen_radar)
+    if (lv_screen_active() != screen_radar)
     {
-        lv_task_set_prio(radar_task_handle, LV_TASK_PRIO_OFF);
+        lv_timer_pause(radar_task_handle);
         return;
     }
 
-    if (lv_scr_act() == screen_radar)
+    if (lv_screen_active() == screen_radar)
     {
         static int mode;
         if (mode)
@@ -377,7 +373,7 @@ static void ui_radar_task(lv_task_t *arg)
             for (int i = 0; i < MAX_NEARBY_NODE; i++)
             {
                 if(ble_nodes[i].active) {
-                    lv_coord_t x = rand() % 80, y = rand() % 60;
+                    int32_t x = rand() % 80, y = rand() % 60;
 
                     if (ble_nodes[i].rssi > -70)
                     {
@@ -439,79 +435,80 @@ static void ui_radar_task(lv_task_t *arg)
 }
 
 void ui_screen_splash_init(){
-    LV_IMG_DECLARE(img_logo);
+    LV_IMAGE_DECLARE(img_logo);
 
-    screen_logo = lv_obj_create(NULL, NULL);
-    lv_obj_t *logo = lv_img_create(screen_logo, NULL);
-    lv_img_set_src(logo, &img_logo);
-    lv_obj_align(logo, NULL, LV_ALIGN_CENTER, 0, 0);
+    screen_logo = lv_obj_create(NULL);
+    lv_obj_t *logo = lv_image_create(screen_logo);
+    lv_image_set_src(logo, &img_logo);
+    lv_obj_align(logo, LV_ALIGN_CENTER, 0, 0);
   /*Change the logo's background color*/
     static lv_style_t style;
     lv_style_init(&style);
-    lv_style_set_bg_opa(&style, LV_STATE_DEFAULT, LV_OPA_COVER);
-    lv_style_set_bg_color(&style, LV_STATE_DEFAULT, LV_COLOR_MAKE(0xff, 0xff, 0xff));
-    lv_obj_add_style(logo, LV_OBJ_PART_MAIN, &style);
+    lv_style_set_bg_opa(&style, LV_OPA_COVER);
+    lv_style_set_bg_color(&style, lv_color_white());
+    lv_obj_add_style(logo, &style, 0);
 
     screens[SCREEN_LOGO] = screen_logo;
 }
 
 void ui_screen_radar_init(){
     // Page for radar
-    LV_IMG_DECLARE(img_radar);
+    LV_IMAGE_DECLARE(img_radar);
     
-    screen_radar = lv_obj_create(NULL, NULL);
-    lv_obj_t *img = lv_img_create(screen_radar, NULL);
-    lv_img_set_src(img, &img_radar);
-    lv_obj_align(img, NULL, LV_ALIGN_IN_TOP_LEFT, 0, 0);
+    screen_radar = lv_obj_create(NULL);
+    lv_obj_t *img = lv_image_create(screen_radar);
+    lv_image_set_src(img, &img_radar);
+    lv_obj_align(img, LV_ALIGN_TOP_LEFT, 0, 0);
 
     for (int i = 0; i < sizeof(radar_node) / sizeof(lv_obj_t *); i++)
     {
-        radar_node[i] = lv_btn_create(img, NULL);
+        radar_node[i] = lv_button_create(img);
         lv_obj_set_size(radar_node[i], 20, 20);
-        lv_btn_toggle(radar_node[i]); // set to solid color.
+        lv_obj_add_state(radar_node[i], LV_STATE_CHECKED); // set to solid color.
         lv_obj_set_hidden(radar_node[i], true);
-        radar_node_number[i] = lv_label_create(radar_node[i], NULL);
+        radar_node_number[i] = lv_label_create(radar_node[i]);
         lv_label_set_text(radar_node_number[i], "X");
     }
 
     screens[SCREEN_RADAR] = screen_radar;
 }
 
+// v9 table has no per-cell align: center the CH column (col 1) at draw time
+static void table_wifi_center_ch_cb(lv_event_t *e)
+{
+    lv_draw_task_t *t = lv_event_get_draw_task(e);
+    lv_draw_label_dsc_t *dsc = lv_draw_task_get_label_dsc(t);
+    if (dsc && dsc->base.part == LV_PART_ITEMS && dsc->base.id2 == 1) dsc->align = LV_TEXT_ALIGN_CENTER;
+}
+
 void ui_screen_wifi_init(){
     static lv_style_t style;
     lv_style_init(&style);
 
-    screen_wifi = lv_obj_create(NULL, NULL);
-    lv_obj_t *page = lv_page_create(screen_wifi, NULL);
-
-    lv_obj_t *scrollable = lv_page_get_scrollable(page);
-    lv_cont_set_layout(scrollable, LV_LAYOUT_PRETTY_TOP);
-    lv_obj_set_style_local_pad_all(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_inner(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_all(page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_inner(page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_page_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
+    screen_wifi = lv_obj_create(NULL);
+    lv_obj_t *page = lv_obj_create(screen_wifi);
+    lv_obj_remove_style_all(page); // bare scroll container: no bg, border or padding
+    lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES);
-    lv_coord_t content_w = lv_obj_get_width_grid(page, 3, 1);
+    int32_t content_w = LV_HOR_RES / 3;
 
-    lv_style_set_text_font(&style, LV_OBJ_PART_MAIN, &lv_font_montserrat_14);
+    lv_style_set_text_font(&style, &lv_font_montserrat_14);
 
-    table_wifi = lv_table_create(page, NULL);
-    lv_obj_clean_style_list(table_wifi, LV_TABLE_PART_BG);
-    lv_obj_set_drag_parent(table_wifi, true);
-    lv_table_set_col_cnt(table_wifi, 3);
-    lv_table_set_col_width(table_wifi, 0, 14 * content_w / 10);
-    lv_table_set_col_width(table_wifi, 1, 5 * content_w / 10);
-    lv_table_set_col_width(table_wifi, 2, 11 * content_w / 10);
-    lv_obj_add_style(table_wifi, LV_OBJ_PART_MAIN, &style);
+    table_wifi = lv_table_create(page);
+    lv_obj_remove_style(table_wifi, NULL, LV_PART_MAIN);
+    lv_table_set_column_count(table_wifi, 3);
+    lv_table_set_column_width(table_wifi, 0, 14 * content_w / 10);
+    lv_table_set_column_width(table_wifi, 1, 5 * content_w / 10);
+    lv_table_set_column_width(table_wifi, 2, 11 * content_w / 10);
+    lv_obj_add_style(table_wifi, &style, 0);
+    lv_obj_set_send_draw_task_events(table_wifi, true);
+    lv_obj_add_event_cb(table_wifi, table_wifi_center_ch_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
 
-    lv_obj_align(table_wifi, page, LV_ALIGN_OUT_TOP_LEFT, 0, 0);
 
     lv_table_set_cell_value(table_wifi, 0, 0, "SSID");
     lv_table_set_cell_value(table_wifi, 0, 1, "CH");
     lv_table_set_cell_value(table_wifi, 0, 2, "dBm");
-    lv_table_set_cell_align(table_wifi, 0, 1, LV_LABEL_ALIGN_CENTER);
 
     screens[SCREEN_WIFI] = screen_wifi;
 }
@@ -521,73 +518,63 @@ void ui_screen_rssi_init(){
     static lv_style_t style;
     lv_style_init(&style);
 
-    screen_rssi = lv_obj_create(NULL, NULL);
-    lv_obj_t *screen_rssi_page = lv_page_create(screen_rssi, NULL);
-
-    lv_obj_t *scrollable = lv_page_get_scrollable(screen_rssi_page);
-    lv_cont_set_layout(scrollable, LV_LAYOUT_PRETTY_TOP);
-    lv_obj_set_style_local_pad_all(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-	lv_obj_set_style_local_pad_inner(scrollable, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_all(screen_rssi_page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_obj_set_style_local_pad_inner(screen_rssi_page, LV_PAGE_PART_BG, LV_STATE_DEFAULT, 0);
-    lv_page_set_scrollbar_mode(screen_rssi_page, LV_SCROLLBAR_MODE_OFF);
+    screen_rssi = lv_obj_create(NULL);
+    lv_obj_t *screen_rssi_page = lv_obj_create(screen_rssi);
+    lv_obj_remove_style_all(screen_rssi_page); // bare scroll container: no bg, border or padding
+    lv_obj_set_scrollbar_mode(screen_rssi_page, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_set_size(screen_rssi_page, LV_HOR_RES, LV_VER_RES);
-    lv_coord_t content_w = lv_obj_get_width_grid(screen_rssi_page, 3, 1);
+    int32_t content_w = LV_HOR_RES / 3;
 
-    lv_style_set_text_font(&style, LV_OBJ_PART_MAIN, &lv_font_montserrat_14);
+    lv_style_set_text_font(&style, &lv_font_montserrat_14);
 
-    table_rssi = lv_table_create(screen_rssi_page, NULL);
-    lv_obj_clean_style_list(table_rssi, LV_TABLE_PART_BG);
-    lv_obj_set_drag_parent(table_rssi, true);
-    lv_table_set_col_cnt(table_rssi, 3);
-    lv_table_set_col_width(table_rssi, 0, content_w);
-    lv_table_set_col_width(table_rssi, 1, content_w);
-    lv_table_set_col_width(table_rssi, 2, content_w);
-    lv_obj_add_style(table_rssi, LV_OBJ_PART_MAIN, &style);
+    table_rssi = lv_table_create(screen_rssi_page);
+    lv_obj_remove_style(table_rssi, NULL, LV_PART_MAIN);
+    lv_table_set_column_count(table_rssi, 3);
+    lv_table_set_column_width(table_rssi, 0, content_w);
+    lv_table_set_column_width(table_rssi, 1, content_w);
+    lv_table_set_column_width(table_rssi, 2, content_w);
+    lv_obj_add_style(table_rssi, &style, 0);
+    lv_obj_set_style_text_align(table_rssi, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
 
-    lv_obj_align(table_rssi, screen_rssi_page, LV_ALIGN_OUT_TOP_LEFT, 0, 0);
 
     lv_table_set_cell_value(table_rssi, 0, 0, "NAME");
     lv_table_set_cell_value(table_rssi, 0, 1, "RSSI");
     lv_table_set_cell_value(table_rssi, 0, 2, "ID");
 
-    lv_table_set_cell_align(table_rssi, 0, 0, LV_LABEL_ALIGN_CENTER);
-    lv_table_set_cell_align(table_rssi, 0, 1, LV_LABEL_ALIGN_CENTER);
-    lv_table_set_cell_align(table_rssi, 0, 2, LV_LABEL_ALIGN_CENTER);
 
     screens[SCREEN_RSSI] = screen_rssi;
 }
 
 void ui_screen_admin_init(){
     // page for admin
-    screen_admin = lv_obj_create(NULL, NULL);
-    admin_switch = lv_btn_create(screen_admin, NULL);
+    screen_admin = lv_obj_create(NULL);
+    admin_switch = lv_button_create(screen_admin);
     lv_obj_set_size(admin_switch, 200, 50);
     lv_obj_set_pos(admin_switch, 60, 35);
-    admin_switch_text = lv_label_create(admin_switch, NULL);
+    admin_switch_text = lv_label_create(admin_switch);
     lv_label_set_text(admin_switch_text, "TURN ON AP");
 
-    admin_ssid = lv_label_create(screen_admin, NULL);
-    lv_obj_align(admin_ssid, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 10);
+    admin_ssid = lv_label_create(screen_admin);
+    lv_obj_align_to(admin_ssid, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 10);
     lv_obj_set_hidden(admin_ssid, true);
-    admin_pass = lv_label_create(screen_admin, NULL);
-    lv_obj_align(admin_pass, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 30);
+    admin_pass = lv_label_create(screen_admin);
+    lv_obj_align_to(admin_pass, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 30);
     lv_obj_set_hidden(admin_pass, true);
 
-    admin_client_ip = lv_label_create(screen_admin, NULL);
-    lv_obj_align(admin_client_ip, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 50);
+    admin_client_ip = lv_label_create(screen_admin);
+    lv_obj_align_to(admin_client_ip, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 50);
     lv_label_set_text(admin_client_ip, "Client IP: [Not Connected]");
     lv_obj_set_hidden(admin_client_ip, true);
-    admin_gateway_ip = lv_label_create(screen_admin, NULL);
-    lv_obj_align(admin_gateway_ip, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 70);
+    admin_gateway_ip = lv_label_create(screen_admin);
+    lv_obj_align_to(admin_gateway_ip, admin_switch, LV_ALIGN_OUT_BOTTOM_MID, -50, 70);
     lv_label_set_text(admin_gateway_ip, "Gateway: [Not Available]");
     lv_obj_set_hidden(admin_gateway_ip, true);
 
-    admin_switch_sta = lv_btn_create(screen_admin, NULL);
+    admin_switch_sta = lv_button_create(screen_admin);
     lv_obj_set_size(admin_switch_sta, 200, 50);
     lv_obj_set_pos(admin_switch_sta, 60, 180);
-    admin_switch_sta_text = lv_label_create(admin_switch_sta, NULL);
+    admin_switch_sta_text = lv_label_create(admin_switch_sta);
     lv_obj_set_hidden(admin_switch_sta, !UI_STA_ENABLED);
     lv_label_set_text(admin_switch_sta_text, "WIFI STA");
 
@@ -596,7 +583,7 @@ void ui_screen_admin_init(){
 
 void ui_screen_snake_init(){
     // page for snake
-    screen_snake = lv_obj_create(NULL, NULL);
+    screen_snake = lv_obj_create(NULL);
     snake_reset(screen_snake);
 
     screens[SCREEN_SNAKE] = screen_snake;
@@ -607,7 +594,7 @@ void ui_screen_snake_init(){
 static void ui_rainbow_update_label(void) {
     lv_label_set_text_fmt(rainbow_label, "%s\n\n(short press:\nnext animation)",
                           rainbow_current_animation_name());
-    lv_obj_align(rainbow_label, NULL, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(rainbow_label, LV_ALIGN_CENTER, 0, 0);
 }
 
 // Advance to the next LED animation (called on any short press while on the
@@ -619,19 +606,20 @@ static void ui_rainbow_next(void) {
 
 void ui_screen_rainbow_init(){
     // page for the rainbow LED loop easter egg (black background)
-    screen_rainbow = lv_obj_create(NULL, NULL);
-    lv_obj_set_style_local_bg_color(screen_rainbow, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_BLACK);
-    lv_obj_set_style_local_bg_opa(screen_rainbow, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+    screen_rainbow = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_rainbow, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen_rainbow, LV_OPA_COVER, 0);
 
-    rainbow_label = lv_label_create(screen_rainbow, NULL);
-    lv_obj_set_style_local_text_color(rainbow_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_label_set_align(rainbow_label, LV_LABEL_ALIGN_CENTER);
+    rainbow_label = lv_label_create(screen_rainbow);
+    lv_obj_set_style_text_color(rainbow_label, lv_color_white(), 0);
+    lv_obj_set_style_text_align(rainbow_label, LV_TEXT_ALIGN_CENTER, 0);
     ui_rainbow_update_label();
 
     screens[SCREEN_RAINBOW] = screen_rainbow;
 }
 
 void ui_ap_start_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    lvgl_port_lock(0);
     ap_started = true;
 
     ESP_LOGI("UI", "AP started handler called");
@@ -652,11 +640,13 @@ void ui_ap_start_handler(void *arg, esp_event_base_t event_base, int32_t event_i
     // TODO: Also create a delayed task to retry getting IP info
     // xTaskCreate(ui_delayed_ip_update_task, "delayed_ip_update", 2048, NULL, 5, NULL);
 
-    lv_btn_set_state(admin_switch, LV_BTN_STATE_CHECKED_PRESSED);
+    lv_obj_add_state(admin_switch, LV_STATE_CHECKED | LV_STATE_PRESSED);
     admin_state = ADMIN_STATE_AP;
+    lvgl_port_unlock();
 }
 
 void ui_ap_stop_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    lvgl_port_lock(0);
     ap_started = false;
 
     lv_label_set_text(admin_switch_text, "TURN ON AP");
@@ -666,18 +656,20 @@ void ui_ap_stop_handler(void *arg, esp_event_base_t event_base, int32_t event_id
     lv_obj_set_hidden(admin_gateway_ip, true);
     lv_obj_set_hidden(admin_switch_sta, !UI_STA_ENABLED);
 
-    lv_btn_set_state(admin_switch, LV_BTN_STATE_RELEASED);//enabl(admin_switch);
+    lv_obj_remove_state(admin_switch, LV_STATE_CHECKED | LV_STATE_PRESSED);//enabl(admin_switch);
     admin_state = ADMIN_STATE_OFF;
+    lvgl_port_unlock();
 }
 
 void ui_sta_connected_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    lvgl_port_lock(0);
     sta_connected = true;
 
     ESP_LOGI("UI", "STA connected handler called");
     ESP_LOGI("UI", "Current admin_state: %d", admin_state);
     ESP_LOGI("UI", "Current screen: %d", current_screen);
     
-    lv_btn_set_state(admin_switch_sta, LV_BTN_STATE_CHECKED_PRESSED);
+    lv_obj_add_state(admin_switch_sta, LV_STATE_CHECKED | LV_STATE_PRESSED);
     lv_label_set_text(admin_switch_sta_text, "Connected (DOWN: stop)");
     
     // Update IP information when connected as station immediately
@@ -689,25 +681,31 @@ void ui_sta_connected_handler(void *arg, esp_event_base_t event_base, int32_t ev
     // xTaskCreate(ui_delayed_ip_update_task, "delayed_ip_update", 2048, NULL, 5, NULL);
     
     admin_state = ADMIN_STATE_STA;
+    lvgl_port_unlock();
 }
 
 void ui_sta_disconnected_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    lvgl_port_lock(0);
     sta_connected = false;
-    lv_btn_set_state(admin_switch_sta, LV_BTN_STATE_RELEASED);
+    lv_obj_remove_state(admin_switch_sta, LV_STATE_CHECKED | LV_STATE_PRESSED);
     lv_obj_set_hidden(admin_client_ip, true);
     lv_obj_set_hidden(admin_gateway_ip, true);
     admin_state = ADMIN_STATE_OFF;
+    lvgl_port_unlock();
 }
 
 void ui_sta_stop_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    lvgl_port_lock(0);
     sta_connected = false;
     lv_label_set_text(admin_switch_sta_text, "WIFI STA");
     lv_obj_set_hidden(admin_client_ip, true);
     lv_obj_set_hidden(admin_gateway_ip, true);
     admin_state = ADMIN_STATE_OFF;
+    lvgl_port_unlock();
 }
 
 void ui_connection_progress(uint8_t cur, uint8_t max){
+    lvgl_port_lock(0); // called from the wifi event handler
     if(cur != max){
         char buf[BADGE_BUF_SIZE + 20] = {0}; // Increase the size of buf to accommodate the entire formatted string
         snprintf(buf, sizeof(buf), "Connecting (%d/%d)", cur, max);
@@ -717,6 +715,7 @@ void ui_connection_progress(uint8_t cur, uint8_t max){
         lv_label_set_text(admin_switch_sta_text, "Connection failed!");
         lv_obj_set_hidden(admin_switch_sta_text, false);
     }
+    lvgl_port_unlock();
 }
 
 void ui_update_ip_info() {
@@ -853,6 +852,9 @@ void ui_update_ip_info() {
 
 static void ui_init(void)
 {
+    lv_display_t *disp = lv_display_get_default();
+    lv_display_set_theme(disp, lv_theme_default_init(disp, lv_color_hex(0xe80b60), lv_color_hex(0x0000ff), false, &lv_font_montserrat_14));
+
     ui_screen_splash_init();
 
 
@@ -867,17 +869,21 @@ static void ui_init(void)
 
     ui_screen_rainbow_init();
 
-    radar_task_handle = lv_task_create(ui_radar_task, 2000, LV_TASK_PRIO_OFF, NULL);
-    rssi_task_handle = lv_task_create(ui_rssi_task, 2000, LV_TASK_PRIO_OFF, NULL);
-    wifi_scan_task_handle = lv_task_create(ui_wifi_task, 1000, LV_TASK_PRIO_OFF, NULL);
-    snake_task_handle = lv_task_create(snake_task, 50, LV_TASK_PRIO_OFF, NULL);
+    radar_task_handle = lv_timer_create(ui_radar_task, 2000, NULL);
+    rssi_task_handle = lv_timer_create(ui_rssi_task, 2000, NULL);
+    wifi_scan_task_handle = lv_timer_create(ui_wifi_task, 1000, NULL);
+    snake_task_handle = lv_timer_create(snake_task, 50, NULL);
+    lv_timer_pause(radar_task_handle);
+    lv_timer_pause(rssi_task_handle);
+    lv_timer_pause(wifi_scan_task_handle);
+    lv_timer_pause(snake_task_handle);
 
     // show first page.
-    lv_scr_load(screens[current_screen]);
+    lv_screen_load(screens[current_screen]);
 
     // Turn on backlight and run backlight management task
     ui_update_backlight(true);
-    backlight_task_handle = lv_task_create(ui_backlight_task, 1000, LV_TASK_PRIO_LOW, NULL);
+    backlight_task_handle = lv_timer_create(ui_backlight_task, 1000, NULL);
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_START, &ui_ap_start_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STOP, &ui_ap_stop_handler, NULL));
@@ -886,58 +892,84 @@ static void ui_init(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_STOP, &ui_sta_stop_handler, NULL));
 }
 
-static void ui_tick_task(void *arg)
-{
-    lv_tick_inc(1);
-}
-
 void ui_task(void *arg)
 {
-    SemaphoreHandle_t xGuiSemaphore;
-    xGuiSemaphore = xSemaphoreCreateMutex();
-
-    lv_init();
-    lvgl_driver_init();
-
-    lv_color_t *buf1 = (lv_color_t*) heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    lv_color_t *buf2 = (lv_color_t*) heap_caps_malloc(DISP_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
-
-    static lv_disp_buf_t disp_buf;
-    uint32_t size_in_px = DISP_BUF_SIZE;
-
-    lv_disp_buf_init(&disp_buf, buf1, buf2, size_in_px);
-    lv_disp_drv_t disp_drv;
-    lv_disp_drv_init(&disp_drv);
-    disp_drv.flush_cb = disp_driver_flush;
-    disp_drv.buffer = &disp_buf;
-    lv_disp_drv_register(&disp_drv);
-
-    const esp_timer_create_args_t periodic_timer_args = {
-        .callback = &ui_tick_task,
-        .name = "ui_tick_task",
+    const spi_bus_config_t bus_cfg = {
+        .mosi_io_num = DISP_PIN_MOSI,
+        .miso_io_num = -1, // write-only panel
+        .sclk_io_num = DISP_PIN_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = DISP_BUF_PX * sizeof(uint16_t),
     };
-    esp_timer_handle_t periodic_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 1000));
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
+    const esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = DISP_PIN_CS,
+        .dc_gpio_num = DISP_PIN_DC,
+        .pclk_hz = 40 * 1000 * 1000,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+        .trans_queue_depth = 10,
+    };
+    esp_lcd_panel_io_handle_t io;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_cfg, &io));
+
+    const esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = DISP_PIN_RST,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 16,
+    };
+    esp_lcd_panel_handle_t panel;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io, &panel_cfg, &panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+    // esp_lcd only sends SLPOUT/MADCTL/COLMOD/RAMCTRL; this glass also needs the
+    // power, VCOM, gamma and gate setup the old lvgl_esp32_drivers st7789.c sent.
+    static const struct { uint8_t cmd, len, data[14]; } panel_init[] = {
+        {0xCF, 3, {0x00, 0x83, 0x30}},
+        {0xED, 4, {0x64, 0x03, 0x12, 0x81}},
+        {0xE8, 3, {0x85, 0x01, 0x79}},
+        {0xCB, 5, {0x39, 0x2C, 0x00, 0x34, 0x02}},
+        {0xF7, 1, {0x20}},
+        {0xEA, 2, {0x00, 0x00}},
+        {0xC0, 1, {0x26}},
+        {0xC1, 1, {0x11}},
+        {0xC5, 2, {0x35, 0x3E}},
+        {0xC7, 1, {0xBE}},
+        {0xB1, 2, {0x00, 0x1B}},
+        {0xF2, 1, {0x08}},
+        {0x26, 1, {0x01}},
+        {0xE0, 14, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32, 0x44, 0x42, 0x06, 0x0E, 0x12, 0x14, 0x17}},
+        {0xE1, 14, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E}},
+        {0xB7, 1, {0x07}},
+        {0xB6, 4, {0x0A, 0x82, 0x27, 0x00}},
+    };
+    for (size_t i = 0; i < sizeof(panel_init) / sizeof(panel_init[0]); i++)
+        ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io, panel_init[i].cmd, panel_init[i].data, panel_init[i].len));
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, false)); // INVOFF, as the old driver
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+
+    const lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
+
+    const lvgl_port_display_cfg_t disp_cfg = {
+        .io_handle = io,
+        .panel_handle = panel,
+        .buffer_size = DISP_BUF_PX,
+        .double_buffer = true,
+        .hres = DISP_HRES,
+        .vres = DISP_VRES,
+        .rotation = { .mirror_x = true, .mirror_y = true }, // port sets MADCTL 0xC0, as the old driver
+        .flags = { .buff_dma = true, .swap_bytes = true },
+    };
+    lvgl_port_add_disp(&disp_cfg);
+
+    lvgl_port_lock(0);
     ui_init();
+    lvgl_port_unlock();
 
-    while (1)
-    {
-        /* Delay 1 tick (assumes FreeRTOS tick is 10ms */
-        vTaskDelay(pdMS_TO_TICKS(10));
-
-        /* Try to take the semaphore, call lvgl related function on success */
-        if (pdTRUE == xSemaphoreTake(xGuiSemaphore, portMAX_DELAY))
-        {
-            lv_task_handler();
-            xSemaphoreGive(xGuiSemaphore);
-        }
-    }
-
-    free(buf1);
-    free(buf2);
-    vTaskDelete(NULL);
+    vTaskDelete(NULL); // lvgl_port runs the LVGL task from here on
 }
 
 // Start or stop the rainbow LED loop, which runs on led_task (not LVGL), so entering or
@@ -958,7 +990,7 @@ void ui_switch_page_down()
     ESP_LOGI("DISPLAY", "DISPLAY COUNTER: %d/%d", current_screen+1, NUM_SCREENS);
 
     ui_prepare_current_screen();
-    lv_scr_load_anim(screens[current_screen], LV_SCR_LOAD_ANIM_OVER_TOP, 300, 0, false);
+    lv_screen_load_anim(screens[current_screen], LV_SCREEN_LOAD_ANIM_OVER_TOP, 300, 0, false);
 
     restore_current_task();
 }
@@ -972,7 +1004,7 @@ void ui_switch_page_up()
     ESP_LOGI("DISPLAY", "DISPLAY COUNTER: %d/%d", current_screen+1, NUM_SCREENS);
 
     ui_prepare_current_screen();
-    lv_scr_load_anim(screens[current_screen], LV_SCR_LOAD_ANIM_OVER_BOTTOM, 300, 0, false);
+    lv_screen_load_anim(screens[current_screen], LV_SCREEN_LOAD_ANIM_OVER_BOTTOM, 300, 0, false);
 
     restore_current_task();
 }
@@ -1032,6 +1064,7 @@ void button_task(void *arg)
     {
         if (xQueueReceive(button_events, &msg, portMAX_DELAY))
         {
+            lvgl_port_lock(0);
             if (msg.action == BTN_ACT_HELD)
             {
                 set_screen_led_backlight(badge_obj.brightness_mid);
@@ -1046,6 +1079,7 @@ void button_task(void *arg)
                 if (msg.action == BTN_ACT_LONG_RELEASE) ui_switch_page_up();
                 else ui_button_up();
             }
+            lvgl_port_unlock();
         }
     }
 }

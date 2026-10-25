@@ -295,5 +295,5 @@ The Wi-Fi SSID for connecting to an external Access Point (AP) is limited to **2
 
 ## Use a different logo image
 
-* Convert the BMP/JPG/PNG/SVG file to a C array. You can do this using an [online image converter](https://lvgl.io/tools/imageconverter): use LVGL v8, CF_TRUE_COLOR_ALPHA as color format and and C array as output
+* Convert the BMP/JPG/PNG/SVG file to a C array. You can do this using an [online image converter](https://lvgl.io/tools/imageconverter): use LVGL v9, I8 (256-color indexed, smallest flash) or RGB565 as color format and C array as output
 * adjust [main/badge/common/img_logo.c](main/badge/common/img_logo.c) file

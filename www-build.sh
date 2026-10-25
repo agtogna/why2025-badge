@@ -26,7 +26,7 @@ uglifyjs "$DIR/js/helpers.js" -o "$WORK_DIR/js/helpers.js"
 uglifyjs "$DIR/js/paginator.js" -o "$WORK_DIR/js/paginator.js"
 uglifyjs "$DIR/js/tetris.js" -o "$WORK_DIR/js/tetris.js"
 
-node-sass "$DIR/style.scss" "$WORK_DIR/style.css" --style compressed
+sass --style=compressed --no-source-map "$DIR/style.css" "$WORK_DIR/style.css"
 node-minify --compressor html-minifier -i "$DIR/index.html" -o "$WORK_DIR/index.html" 
 node-minify --compressor html-minifier -i "$DIR/tetris.html" -o "$WORK_DIR/tetris.html"
 

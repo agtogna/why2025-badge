@@ -255,7 +255,7 @@ Install [ESP-IDF v6.0](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32
 * Prerequisites:
    * Install Node.js and NPM
 * Use NPM to Install required Packages:
-   * `npm install node-minify node-sass`
+   * `npm install uglify-js sass @node-minify/cli@6.2.0 @node-minify/html-minifier@6.2.0`
 
 * `./www-build.sh`
 

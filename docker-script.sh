@@ -7,7 +7,7 @@ uglifyjs /public/js/index.js -o /output/js/index.js -c -m
 uglifyjs /public/js/paginator.js -o /output/js/paginator.js -c -m
 uglifyjs /public/js/tetris.js -o /output/js/tetris.js -c -m
 
-node-sass /public/style.scss ./output/style.css --style compressed
+sass --style=compressed --no-source-map /public/style.css /output/style.css
 
 node-minify --compressor html-minifier -i /public/index.html -o /output/index.html
 node-minify --compressor html-minifier -i /public/tetris.html -o /output/tetris.html

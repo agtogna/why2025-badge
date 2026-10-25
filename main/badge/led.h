@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 #include "driver/i2c_master.h"
-#include "common/led_strip.h"
+#include "led_strip.h"
 #include "rgb.h"
 #include "badge.h"
 

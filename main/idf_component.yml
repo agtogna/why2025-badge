@@ -1,6 +1,7 @@
 dependencies:
   espressif/cjson: "^1.7.19"
   espressif/button: "^4.2.2"
+  espressif/led_strip: "^3.0.0"
   esp-idf-lib/color: "^1.0.7"
   lvgl/lvgl: "^9.6.0"
   espressif/esp_lvgl_port: "^2.9.0"

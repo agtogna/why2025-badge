@@ -6,7 +6,7 @@
 static const char *TAG = "strip_ws2812";
 
 static const uint8_t led_order[] = {2, 6, 1, 0, 4, 5, 3}; // 0: center, 6: top
-static led_strip_t *strip;
+static led_strip_handle_t strip;
 static bool easter_egg_active = false; // Flag to block LED flashing during easter eggs
 static volatile bool rainbow_loop_active = false; // Continuous rainbow animation, driven by led_task
 // Set by the UI task; led_task (the only task that may touch the strip) clears the
@@ -51,8 +51,23 @@ void led_init()
     i2c_register_write(0x12, 0x80);
     i2c_register_write(0x13, 0x80);    
 
-    strip = led_strip_init(LED_RMT_TX_GPIO, NUM_LEDS);
-    if (!strip) ESP_LOGE(TAG, "LED strip init failed, LEDs disabled");
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = LED_RMT_TX_GPIO,
+        .max_leds = NUM_LEDS,
+        .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,
+        .mem_block_symbols = 48, // one C3 RMT block
+    };
+    if (led_strip_new_rmt_device(&strip_config, &rmt_config, &strip) != ESP_OK) {
+        strip = NULL;
+        ESP_LOGE(TAG, "LED strip init failed, LEDs disabled");
+    } else {
+        ESP_ERROR_CHECK(led_strip_clear(strip));
+    }
 }
 
 void set_screen_led_backlight(uint8_t brigtness)
@@ -66,9 +81,9 @@ void set_screen_led_backlight(uint8_t brigtness)
 static void led_rgb_color(uint8_t id, rgb_t color){
     if (strip) {
         // Write RGB values to strip driver
-        ESP_ERROR_CHECK(strip->set_pixel(strip, led_order[id], color.red, color.green, color.blue));
+        ESP_ERROR_CHECK(led_strip_set_pixel(strip, led_order[id], color.red, color.green, color.blue));
         // Flush RGB values to LEDs
-        ESP_ERROR_CHECK(strip->refresh(strip, 100));
+        ESP_ERROR_CHECK(led_strip_refresh(strip));
         vTaskDelay(10 / portTICK_PERIOD_MS);
     } else {
         ESP_LOGE(TAG, "Strip not initialized");
@@ -89,7 +104,7 @@ static void all_on(rgb_t color){
 static void all_off(){
     if (!strip) return;
     // Clear LED strip (turn off all LEDs)
-    ESP_ERROR_CHECK(strip->clear(strip, 100));
+    ESP_ERROR_CHECK(led_strip_clear(strip));
     vTaskDelay(10 / portTICK_PERIOD_MS);
 }
 

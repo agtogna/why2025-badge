@@ -1,5 +1,6 @@
 #include "snake.h"
 #include <inttypes.h>
+#include "esp_random.h"
 
 const char ui_snake_eyes[][4] = {"' '", ": ", ". .", " :"};
 
@@ -199,8 +200,8 @@ void snake_task(lv_timer_t *arg)
         snake.food = lv_button_create(screen_snake);
         lv_obj_set_size(snake.food, UI_SNAKE_BODY_SIZE, UI_SNAKE_BODY_SIZE);
         lv_obj_set_pos(snake.food,
-                       (rand() % LV_HOR_RES) / UI_SNAKE_BODY_SIZE * UI_SNAKE_BODY_SIZE,
-                       (rand() % LV_VER_RES) / UI_SNAKE_BODY_SIZE * UI_SNAKE_BODY_SIZE);
+                       (esp_random() % LV_HOR_RES) / UI_SNAKE_BODY_SIZE * UI_SNAKE_BODY_SIZE,
+                       (esp_random() % LV_VER_RES) / UI_SNAKE_BODY_SIZE * UI_SNAKE_BODY_SIZE);
         snake_labels_front();   // keep the HUD above the freshly spawned food
     }
 

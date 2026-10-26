@@ -106,6 +106,14 @@ void wifi_init(void)
 	ESP_ERROR_CHECK( esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &event_handler, NULL) );
 
 
+	// created once: start_wifi_ap runs on every hotspot toggle and would leak a timer each time
+	const esp_timer_create_args_t timer_args = {
+		.callback = &inactivity_timer_callback,
+		.name = "inactivity-timer"
+	};
+
+	ESP_ERROR_CHECK(esp_timer_create(&timer_args, &inactivity_timer));
+
 	ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
 	ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_NULL) );
 	ESP_ERROR_CHECK( esp_wifi_start() );
@@ -138,13 +146,6 @@ bool start_wifi_ap(void)
 	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_AP, &wifi_config) );
 	ESP_ERROR_CHECK( esp_wifi_start() );
 	ESP_ERROR_CHECK( esp_wifi_set_inactive_time(WIFI_IF_AP, AP_INACTIVITY_TIMEOUT_S) );
-
-	const esp_timer_create_args_t timer_args = {
-		.callback = &inactivity_timer_callback,
-		.name = "inactivity-timer"
-	};
-
-	ESP_ERROR_CHECK(esp_timer_create(&timer_args, &inactivity_timer));
 
 	ESP_LOGI(TAG, "WIFI_MODE_AP started. SSID:%s password:%s",
 			 AP_WIFI_SSID, AP_WIFI_PASSWORD);

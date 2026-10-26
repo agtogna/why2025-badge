@@ -27,7 +27,7 @@ void app_main()
 
     // Handle HTTP webserver start/stop
     static httpd_handle_t server = NULL;
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, &connect_handler, &server));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, &connect_handler, &server));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &disconnect_handler, &server));
 
     ESP_LOGI(__FILE__, "MAIN END: free_heap_size = %lu\n", esp_get_free_heap_size());

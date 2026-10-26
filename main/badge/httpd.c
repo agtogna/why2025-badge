@@ -559,7 +559,7 @@ void connect_handler(void* arg, esp_event_base_t event_base,
 void disconnect_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
-    client_count--;
+    if (client_count > 0) client_count--;
     ESP_LOGI(__FILE__, "Number of clients: %d", client_count);
 
     ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());

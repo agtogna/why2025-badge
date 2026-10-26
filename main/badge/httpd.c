@@ -181,7 +181,7 @@ static esp_err_t login_handler(httpd_req_t *req, const char* client_data){
     char *badge_pass = badge_obj.web_login;
     esp_err_t err;
     if(cJSON_IsString(client_pass) && (client_pass->valuestring != NULL) 
-        && !strncmp(client_pass->valuestring, badge_pass, strlen(badge_pass)))
+        && !strcmp(client_pass->valuestring, badge_pass))
     {
         session_init(req);
 

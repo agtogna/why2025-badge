@@ -31,5 +31,14 @@
         "semphr.h": "c",
         "stdio.h": "c"
     },
-    "idf.currentSetup": "/home/tag/.espressif/v6.1/esp-idf"
+    "idf.currentSetup": "/home/tag/.espressif/v6.1/esp-idf",
+    "idf.customExtraVars": {
+        "IDF_TARGET": "esp32c3"
+    },
+    "clangd.path": "/home/tag/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
+    "clangd.arguments": [
+      "--background-index",
+      "--query-driver=**",
+      "--compile-commands-dir=/home/tag/workdir/why2025-badge/build"
+    ]
 }

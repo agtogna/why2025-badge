@@ -76,7 +76,7 @@ Start the AP mode (move up the Dial Wheel Switch) and connect from your PC/phone
 
 STA mode (connect to the Wi-Fi configured in `sta`) is implemented but disabled in the UI. Set `UI_STA_ENABLED` to `1` in `main/badge/ui.h` to show the button and start it by moving the Dial Wheel Switch down.
 
-### Sixt Screen
+### Sixth Screen
 Have fun while playing Snake! 🐍
 ![EMF2026 sixth screen](img/screen-6.jpg)
 
@@ -84,9 +84,9 @@ Have fun while playing Snake! 🐍
 Rainbow loop! 🌈 A continuous LED animation across all 7 front RGB LEDs —
 great for walking around camp and showing off some lights at night. It starts
 the moment you arrive on this screen and stops the moment you leave it. Short
-press either wheel to cycle through 5 animations: **Rainbow Chase**, **Color
-Wave**, **Strobe Party**, **Twinkle Sparkle**, and **Comet Spin**. The screen
-shows which one is currently playing.
+press either wheel to cycle through 6 animations: **Rainbow Chase**, **Color
+Wave**, **Strobe Party**, **Twinkle Sparkle**, **Comet Spin**, and **Flashlight**
+(all 7 LEDs solid white). The screen shows which one is currently playing.
 
 ## Characteristics
 
@@ -173,7 +173,7 @@ The badge's main input interface consists of two **Dial Wheel Switches**. These 
 Pressing the center of the left switch results in the same effect as rotating the wheel UP, while pressing the center of the right switch results in the same effect as rotating the wheel DOWN.
 
 Note: 
-push the left switch (or rotating the wheel UP) during boot to put the MCU in Joint Download Boot mode to download binary files into flash using UART0 or USB interface. To reset/restart the MCU push the micro switch labeled "RST" on the top left of the badege.
+push the left switch (or rotating the wheel UP) during boot to put the MCU in Joint Download Boot mode to download binary files into flash using UART0 or USB interface. To reset/restart the MCU push the micro switch labeled "RST" on the top left of the badge.
 
 #### Badge stuck on boot / factory reset
 
@@ -189,6 +189,7 @@ If a badge is stuck in a boot loop (serial log repeats `esp_image: invalid segme
    python $IDF_PATH/components/spiffs/spiffsgen.py 0x100000 data build/storage.bin
    esptool.py --chip esp32c3 -p /dev/ttyACM0 write_flash 0x210000 build/storage.bin
    ```
+   If `flash` keeps dropping the USB link mid-image, use `tools/flash_chunked.sh build` instead (64 KB chunks, retries each; re-enter download mode when it stalls). The bootloader and partition table must already be written.
    (`flash` fixes the corrupted firmware; the `storage.bin` write refreshes the filesystem — settings/high scores regenerate from defaults on next boot.)
 
 The badge's native USB-JTAG interface will normally re-enumerate on its own after the flash; if the port is not found automatically, pass it explicitly with `-p`, e.g. `-p /dev/cu.usbmodemXXXX`.
@@ -293,7 +294,7 @@ Check [GitHub issue tracker](https://github.com/CyberSaiyanIT/why2025-badge/issu
 
 # Misc
 
-## Wi-Fi SSID name lenght limit
+## Wi-Fi SSID name length limit
 
 The Wi-Fi SSID for connecting to an external Access Point (AP) is limited to **20 characters**.
 

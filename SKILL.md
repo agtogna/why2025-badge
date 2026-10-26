@@ -13,8 +13,8 @@ description: >-
 A Dragon Ball–themed electronic conference badge. Originally built for the
 **WHY2025** hacker camp; **adapted for EMF2026** (Electromagnetic Field) on the
 `EMF2026` branch. Repo holds both the firmware (C, ESP-IDF) and the hardware
-design (KiCad). **LVGL is v7** here (lv_page, lv_task_t,
-`lv_obj_get_child(o,NULL)`), not v8 — matters for any UI work.
+design (KiCad). **LVGL is v9** here (`lv_timer_t`, run by `esp_lvgl_port`; pulled in via
+`main/idf_component.yml`) — matters for any UI work.
 
 **Branching / releases**: `EMF2026` is the working (de-facto main) branch for
 EMF development — push fixes directly to it, or merge them from dedicated feature
@@ -44,7 +44,7 @@ left unstaged, refreshed only for a release).
 ## Firmware layout (`main/`)
 
 `main.c` → `app_main()` initializes storage/settings then spawns FreeRTOS tasks
-pinned across the two logical cores:
+pinned to core 0 (ESP32-C3 is single core; IDF 5+ asserts on core 1):
 
 | Task            | Priority/Core | Responsibility                                   | File                 |
 |-----------------|---------------|--------------------------------------------------|----------------------|
@@ -52,8 +52,8 @@ pinned across the two logical cores:
 | `led_init()`    | (init)        | WS2812B RMT setup                                | `badge/led.c`        |
 | `bt_task`       | 6 / core 0    | BLE advertise + scan for nearby badges (raw HCI) | `badge/bt.c`         |
 | `wifi_task`     | 5 / core 0    | AP/STA state machine via `wifi_queue`            | `badge/wifi.c`       |
-| `ui_task`       | 0 / core 1    | LVGL v7 UI, 7 screens                            | `badge/ui.c`         |
-| `led_task`      | 10 / core 1   | Dragon-sphere animations + easter eggs           | `badge/led.c`        |
+| `ui_task`       | 6 / core 0    | one-shot: display/LVGL/UI setup, then deletes itself (`esp_lvgl_port` runs the LVGL task), 7 screens | `badge/ui.c` |
+| `led_task`      | 10 / core 0   | Dragon-sphere animations + easter eggs           | `badge/led.c`        |
 | `button_task`   | 1 / core 0    | dial-wheel input handling                        | `badge/ui.c`         |
 | HTTP server     | event-driven  | web UI on AP at `192.168.4.1`                    | `badge/httpd.c`      |
 
@@ -81,19 +81,21 @@ Long-press either dial to switch screens; short-press to interact.
 3. `screen_wifi` — live Wi-Fi AP scan (SSID, channel, RSSI dBm + bars, strongest first).
    `wifi_task` scans every ~0.5 s only while this screen is shown and AP/STA are
    off (`EVENT_SCAN_START/STOP`); results via `wifi_get_scan()`.
-4. `screen_admin` — Wi-Fi admin: AP mode (up) / STA mode (down)
+4. `screen_admin` — Wi-Fi admin: AP mode (up); STA button (down) is hidden unless
+   `UI_STA_ENABLED` is 1 in `ui.h` (default 0)
 5. `screen_snake` — Snake game (`badge/snake.c`): 1 point per ball eaten, black
    SCORE/HIGH labels in the top corners (white screen, kept in foreground); high
    score persisted to a SPIFFS file (`/data/snake_hi`), persisted the same way across reboots.
-6. `screen_rainbow` — 5 selectable continuous LED animations (**Rainbow
-   Chase, Color Wave, Strobe Party, Twinkle Sparkle, Comet Spin**), entirely
+6. `screen_rainbow` — 6 selectable continuous LED animations (**Rainbow
+   Chase, Color Wave, Strobe Party, Twinkle Sparkle, Comet Spin, Flashlight**
+   — the last is all 7 LEDs solid white), entirely
    on `led_task` (its own FreeRTOS task, not LVGL) — see the `rainbow_anims[]`
    dispatch table + `set_rainbow_loop_active()` / `rainbow_next_animation()` /
    `rainbow_current_animation_name()` in `badge/led.c`/`led.h`.
    `ui_prepare_current_screen` flips the active flag on entry/exit
    (`current_screen == SCREEN_RAINBOW`), always restarting at animation 1; a
    short press of either wheel (in `ui_button_up`/`ui_button_down`, via
-   `ui_rainbow_next()` in ui.c) advances to the next one, wrapping 5→1, and
+   `ui_rainbow_next()` in ui.c) advances to the next one, wrapping 6→1, and
    updates the on-screen label to the new name. Every animation's `step()`
    does at most a handful of LED writes per call and paces itself with its own
    tick counter at a shared `RAINBOW_TICK_MS` (60ms) cadence — never a
@@ -140,7 +142,7 @@ the `sta` block in `default.json`:
 - **Open** — `sta.ssid` set, `sta.password` empty, `sta.enterprise` false/absent.
 - **WPA2-PSK** — `sta.password` non-empty, `sta.enterprise` false.
 - **WPA2/WPA3-Enterprise 802.1X** — `sta.enterprise: true`. Uses the ESP-IDF EAP
-  client (`esp_wpa2.h`, PEAP/EAP-TTLS) via `sta_apply_enterprise()`; sets
+  client (`esp_eap_client.h`, PEAP/EAP-TTLS) via `sta_apply_enterprise()`; sets
   identity/username/password from `sta.identity`/`sta.username`/`sta.password`,
   PMF-capable (not required), and does **not** validate the server cert (EMF
   marks it optional, so no CA cert is embedded).
@@ -165,15 +167,16 @@ Nearby badges feed `ble_nodes[]`, consumed by the radar and rssi screens.
 
 ## Web app (`public/` → `data/www/`)
 
-Static site served from SPIFFS by `httpd.c`. `public/` is the source, `data/www/`
-is the deployed (minified) copy. Includes a **Tetris** easter egg (click the web
-logo 7×) and the config UI. Endpoints are `/api/v1/*`; `saiyan` is the web pwd.
+Static site served from SPIFFS by `httpd.c`. `public/` is the readable source,
+`data/www/` is the minified deployed copy (they differ). Includes a **Tetris**
+easter egg (click the web logo 7×) and the config UI. API is `POST /api/v1/<cmd>`
+(`login`, `logout`, `check_authentication`, `info`, `radar`, `name`, `wifi`,
+`password`, `reset`; see `httpd.c`); `saiyan` is the default web pwd.
 
-**IMPORTANT — the `www-build.sh` toolchain is NOT usable here**: `node`/`uglifyjs`/
-`node-sass`/`node-minify` aren't installed and there's no `style.scss` (only
-`style.css`), so the build can't run. The `public/` files are already minified
-and byte-identical to `data/www/`, so **edit BOTH `public/` and `data/www/`
-directly** (same literal string) when changing web JS/HTML. Then reflash the filesystem.
+Edit `public/`, then regenerate `data/www/` with `./www-build.sh` (needs Node,
+`uglify-js`, `sass`, `@node-minify/*`) or the Docker image (see README), then
+reflash the filesystem. Without the toolchain, apply the same change by hand to
+both trees — `data/www/` is minified, so match the literal string.
 
 ## Branding / event-specific bits (already EMF2026; here for the next retarget)
 
@@ -197,7 +200,7 @@ KiCad `WHY_LOGO` footprint.
 
 - ESP-IDF v6.0, target `esp32c3`, board settings in `sdkconfig.defaults`
   (curated; `sdkconfig` is generated and git-ignored). LVGL uses custom heap
-  (`CONFIG_LV_MEM_CUSTOM=y` → LVGL allocs come from the system heap). Partitions
+  (`CONFIG_LV_USE_CLIB_MALLOC=y` → LVGL allocs come from the system heap; only the LVGL widgets/fonts the UI uses are enabled — keep `sdkconfig.defaults` in sync with UI changes). Partitions
   in `partitions.csv` (SPIFFS `storage` = 1 MB at `0x210000`).
 - Firmware: `idf.py build`, then `idf.py -p /dev/ttyACM0 flash`.
 - **Filesystem** (SPIFFS, i.e. `data/`) must be flashed separately from
@@ -222,13 +225,16 @@ KiCad `WHY_LOGO` footprint.
   Fix: enter download mode (above), then reflash firmware (`idf.py flash`) and
   the filesystem (`storage.bin` at `0x210000`; settings/high scores regenerate from
   defaults on next boot since they're not in the `data/` source tree).
+  If a normal flash keeps dropping the USB link, use `tools/flash_chunked.sh <build_dir>`
+  (64 KB chunks with retries; bootloader + partition table must already be written).
 
 ## Conventions / gotchas
 
 - Logging uses `ESP_LOGI(__FILE__, ...)`.
 - `data/` (SPIFFS) and `main/` (firmware) are two independent flash images —
   remember to reflash the filesystem after editing JSON/web assets.
-- `components/` vendors LVGL (v7), lvgl_esp32_drivers, color, lib8tion.
+- Dependencies (LVGL, esp_lvgl_port, led_strip, button, cJSON, color, lib8tion) come from the IDF component manager into git-ignored `managed_components/`; see `main/idf_component.yml`.
+- Host tests: `make -C tests/host` (BLE advert parser, plain gcc).
 - Easter eggs: LED sequences (e.g. rainbow) triggered by input patterns in
   `led.c`; a "collision" bug between easter eggs and normal flashing was fixed
   in git history.

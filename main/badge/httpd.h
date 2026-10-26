@@ -35,6 +35,7 @@ typedef struct rest_server_context {
 } rest_server_context_t;
 
 #define SESSION_KEY_LEN 8
+#define AP_PASSWORD_MIN_LEN 8
 
 void disconnect_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data);

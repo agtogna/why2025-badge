@@ -312,6 +312,14 @@ static esp_err_t badge_name_handler(httpd_req_t *req, const char* client_data){
     return err;
 }
 
+static esp_err_t bad_request(httpd_req_t *req, cJSON *response, cJSON *client_json, const char *msg)
+{
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+    cJSON_Delete(response);
+    cJSON_Delete(client_json);
+    return ESP_FAIL;
+}
+
 static esp_err_t wifi_handler(httpd_req_t *req, const char* client_data){
     httpd_resp_set_type(req, "application/json");
 
@@ -326,10 +334,18 @@ static esp_err_t wifi_handler(httpd_req_t *req, const char* client_data){
             cJSON* password = cJSON_GetObjectItem(wifi, "password");
 
             if(cJSON_IsString(ssid) && (ssid->valuestring != NULL) && (strlen(ssid->valuestring) > 0)) {
+                if(strlen(ssid->valuestring) >= SIZEOF(badge_obj.ap_ssid)) {
+                    return bad_request(req, response, client_json, "ssid too long");
+                }
                 badge_obj.update(1, ssid->valuestring);
             } else if(cJSON_IsString(password) && (password->valuestring != NULL) && (strlen(password->valuestring) > 0)){
+                // WPA2 needs 8+ chars; a shorter one makes the AP fail to start (and reboot)
+                size_t len = strlen(password->valuestring);
+                if(len < AP_PASSWORD_MIN_LEN || len >= SIZEOF(badge_obj.ap_password)) {
+                    return bad_request(req, response, client_json, "password must be 8-19 characters");
+                }
                 badge_obj.update(2, password->valuestring);
-            } 
+            }
         }
         
         cJSON *wifi_obj = cJSON_CreateObject();

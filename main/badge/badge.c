@@ -231,6 +231,10 @@ void badge_init(){
     snprintf(badge_obj.web_login, SIZEOF(badge_obj.web_login), "%s", web_login);
     snprintf(badge_obj.ap_ssid, SIZEOF(badge_obj.ap_ssid), "%s", ap_ssid);
     snprintf(badge_obj.ap_password, SIZEOF(badge_obj.ap_password), "%s", ap_password);
+    // A saved password under 8 chars makes the AP abort on start: fall back to the default one
+    if (strlen(badge_obj.ap_password) > 0 && strlen(badge_obj.ap_password) < AP_PASSWORD_MIN_LEN) {
+        snprintf(badge_obj.ap_password, SIZEOF(badge_obj.ap_password), "%02x%02x%02x%02x", badge_obj.mac[2], badge_obj.mac[3], badge_obj.mac[4], badge_obj.mac[5]);
+    }
     snprintf(badge_obj.sta_ssid, SIZEOF(badge_obj.sta_ssid), "%s", sta_ssid);
     snprintf(badge_obj.sta_password, SIZEOF(badge_obj.sta_password), "%s", sta_password);
 

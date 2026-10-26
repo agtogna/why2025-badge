@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 
 #include "common/bt_hci_common.h"
+#include "common/ble_parse.h"
 
 #include "esp_bt.h"
 #include "badge.h"

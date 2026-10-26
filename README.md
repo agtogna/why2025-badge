@@ -250,6 +250,10 @@ Install [ESP-IDF v6.0](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32
 
 * Git clone this repository and open it on VSCode
 
+## Host tests
+
+* `make -C tests/host` runs the BLE advert parser tests with plain gcc (no ESP-IDF needed).
+
 ## Build www data (Linux)
 
 * Prerequisites:

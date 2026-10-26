@@ -11,3 +11,4 @@ sdkconfig.old
 .codegraph/
 main/badge/version.c
 managed_components/
+tests\/host\/test_ble_parse

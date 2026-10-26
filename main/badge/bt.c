@@ -1,11 +1,6 @@
 #include "bt.h"
 
 typedef struct {
-    char scan_local_name[32];
-    uint8_t name_len;
-} ble_scan_local_name_t;
-
-typedef struct {
     uint8_t *q_data;
     uint16_t q_data_len;
 } host_rcv_data_t;
@@ -246,38 +241,6 @@ static void hci_cmd_send_ble_set_adv_data(void)
     ESP_LOGI(__FILE__, "Starting BLE advertising with name \"%s\"", adv_name);
 }
 
-static esp_err_t get_local_name (uint8_t *data_msg, uint8_t data_len, ble_scan_local_name_t *scanned_packet)
-{
-    uint8_t curr_ptr = 0, curr_len, curr_type;
-    while (curr_ptr < data_len) {
-        curr_len = data_msg[curr_ptr++];
-        if (curr_len == 0 || curr_ptr >= data_len) {
-            return ESP_FAIL;
-        }
-        curr_type = data_msg[curr_ptr++];
-        /* The AD length comes from a stranger's advert: keep it inside the packet. */
-        if (curr_ptr + curr_len - 1 > data_len) {
-            return ESP_FAIL;
-        }
-
-        /* Search for current data type and see if it contains name as data (0x08 or 0x09). */
-        if (curr_type == 0x08 || curr_type == 0x09) {
-            if (curr_len - 1 >= sizeof(scanned_packet->scan_local_name)) {
-                return ESP_FAIL;
-            }
-            for (uint8_t i = 0; i < curr_len - 1; i += 1) {
-                scanned_packet->scan_local_name[i] = data_msg[curr_ptr + i];
-            }
-            scanned_packet->name_len = curr_len - 1;
-            return ESP_OK;
-        } else {
-            /* Search for next data. Current length includes 1 octate for AD Type (2nd octate). */
-            curr_ptr += curr_len - 1;
-        }
-    }
-    return ESP_FAIL;
-}
-
 esp_err_t bt_init()
 {
     bool continue_commands = 1;
@@ -347,7 +310,7 @@ void bt_task(void *unused)
         ESP_LOGE(__FILE__, "Malloc rcv_data failed!");
         return;
     }
-    esp_err_t ret;
+    bool ok;
 
     while (1) {
         uint8_t sub_event, num_responses, hci_event_opcode;
@@ -459,11 +422,11 @@ void bt_task(void *unused)
                         goto reset;
                     }
                     for (uint8_t i = 0; i < num_responses; i += 1) {
-                        ret = get_local_name(&data_msg[data_msg_ptr], data_len[i], scanned_name);
+                        ok = ble_parse_local_name(&data_msg[data_msg_ptr], data_len[i], scanned_name);
                         data_msg_ptr += data_len[i];
 
                         /* Print the data if adv report has a valid name. */
-                        if (ret == ESP_OK) {
+                        if (ok) {
                             scanned_name->scan_local_name[scanned_name->name_len] = '\0';
                             //add_ble_node(scanned_name->scan_local_name, scanned_name->name_len, rssi[i]);
                             insert(scanned_name->scan_local_name, scanned_name->name_len, rssi[i]);

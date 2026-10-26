@@ -181,6 +181,7 @@ bool start_wifi_sta()
 		sta_apply_enterprise();
 	}
     ESP_ERROR_CHECK( esp_wifi_start() );
+	curr_mode = WIFI_MODE_STA;   // set before the wait: stop_wifi() on failure resets it to NULL
 	ESP_ERROR_CHECK( esp_wifi_connect() );
 
 	int bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
@@ -195,7 +196,6 @@ bool start_wifi_sta()
 		stop_wifi();
 	}
 
-    curr_mode = WIFI_MODE_STA;
 	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
 
 	return (bits & CONNECTED_BIT) != 0;
@@ -242,6 +242,7 @@ bool start_wifi_apsta()
 	ESP_LOGI(TAG, "WIFI_MODE_AP started. SSID:%s password:%s",
 			 AP_WIFI_SSID, AP_WIFI_PASSWORD);
 
+	curr_mode = WIFI_MODE_APSTA;   // set before the wait: stop_wifi() on failure resets it to NULL
 	ESP_ERROR_CHECK( esp_wifi_connect() );
 	int bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
 								   pdFALSE, pdTRUE, STA_TIMEOUT_MS / portTICK_PERIOD_MS);
@@ -255,7 +256,6 @@ bool start_wifi_apsta()
 		stop_wifi();
 	}
 
-    curr_mode = WIFI_MODE_APSTA;
 	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
 
 	return (bits & CONNECTED_BIT) != 0;

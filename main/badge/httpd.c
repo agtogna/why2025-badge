@@ -254,17 +254,19 @@ static esp_err_t radar_handler(httpd_req_t *req){
     cJSON *radar = cJSON_AddArrayToObject(response, "radar");
 
     char buf[BADGE_BUF_SIZE] = {0};
+    ble_node_t nodes[MAX_NEARBY_NODE];
+    ble_nodes_snapshot(nodes);
 
     for (int i = 0; i < MAX_NEARBY_NODE; i++) {
-        if(!ble_nodes[i].active) continue;
+        if(!nodes[i].active) continue;
 
         cJSON *item = cJSON_CreateObject();
         
-        //snprintf(buf, sizeof(buf), "%s", ble_nodes[i].name);
-        cJSON_AddStringToObject(item, "name", ble_nodes[i].name);
-        snprintf(buf, sizeof(buf), "%d dBm", ble_nodes[i].rssi);
+        //snprintf(buf, sizeof(buf), "%s", nodes[i].name);
+        cJSON_AddStringToObject(item, "name", nodes[i].name);
+        snprintf(buf, sizeof(buf), "%d dBm", nodes[i].rssi);
         cJSON_AddStringToObject(item, "rssi", buf);
-        snprintf(buf, sizeof(buf), "%d", ble_nodes[i].id);
+        snprintf(buf, sizeof(buf), "%d", nodes[i].id);
         cJSON_AddStringToObject(item, "id", buf);
         cJSON_AddItemToArray(radar, item);
     }

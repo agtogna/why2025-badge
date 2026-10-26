@@ -322,7 +322,9 @@ void bt_task(void *unused)
         total_data_len = 0;
         data_msg_ptr = 0;
 
+        ble_nodes_lock();
         disable_nodes(xTaskGetTickCount());
+        ble_nodes_unlock();
 
         if (xQueueReceive(adv_queue, rcv_data, pdMS_TO_TICKS(NODE_QUEUE_TIMEOUT_MS)) == pdPASS) {
             /* `data_ptr' keeps track of current position in the received data. */
@@ -429,7 +431,9 @@ void bt_task(void *unused)
                         if (ok) {
                             scanned_name->scan_local_name[scanned_name->name_len] = '\0';
                             //add_ble_node(scanned_name->scan_local_name, scanned_name->name_len, rssi[i]);
+                            ble_nodes_lock();
                             insert(scanned_name->scan_local_name, scanned_name->name_len, rssi[i]);
+                            ble_nodes_unlock();
                         }
                     }
 

@@ -6,24 +6,46 @@
 ble_node_t ble_nodes[MAX_NEARBY_NODE];
 badge_obj_t badge_obj;
 
+static SemaphoreHandle_t ble_nodes_mutex;
+
+void ble_nodes_lock(void) {
+    if (ble_nodes_mutex) xSemaphoreTake(ble_nodes_mutex, portMAX_DELAY);
+}
+
+void ble_nodes_unlock(void) {
+    if (ble_nodes_mutex) xSemaphoreGive(ble_nodes_mutex);
+}
+
+void ble_nodes_snapshot(ble_node_t *out) {
+    ble_nodes_lock();
+    memcpy(out, ble_nodes, sizeof(ble_nodes));
+    ble_nodes_unlock();
+}
+
 uint8_t count_ble_nodes(){
+    ble_node_t nodes[MAX_NEARBY_NODE];
+    ble_nodes_snapshot(nodes);
+
     uint8_t cnt = 0;
     for(int i=0; i<MAX_NEARBY_NODE; i++)
     {
-        if(ble_nodes[i].active) cnt++;
+        if(nodes[i].active) cnt++;
     }
     return cnt;
 }
 
 bool check_ble_set()
 {   
+    ble_node_t nodes[MAX_NEARBY_NODE];
+    ble_nodes_snapshot(nodes);
+
     uint8_t set_bits = 0;
     set_bits |= 1 << (badge_obj.device_id-1);
 
     for(int i=0; i<MAX_NEARBY_NODE; i++)
     {
-        if(ble_nodes[i].active){
-            set_bits |= 1 << (ble_nodes[i].id-1);
+        if(nodes[i].active){
+            set_bits |= 1 << (nodes[i].id-1);
         }
     }
     return set_bits == 0x7F;
@@ -192,6 +214,8 @@ uint8_t generate_id(uint16_t seed) {
 }
 
 void badge_init(){
+    ble_nodes_mutex = xSemaphoreCreateMutex();
+
     // Init storage
     nvs_init();
     spiffs_init();

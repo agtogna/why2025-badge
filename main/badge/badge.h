@@ -71,6 +71,11 @@ typedef struct {
     bool active;
 } ble_node_t;
 
+// ble_nodes is written by bt_task: take the lock around writes, or read through a snapshot
+void ble_nodes_lock(void);
+void ble_nodes_unlock(void);
+void ble_nodes_snapshot(ble_node_t *out);
+
 enum enum_badge_event {
     EVENT_HOTSPOT_START, 
     EVENT_HOTSPOT_STOP, 

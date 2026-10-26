@@ -327,7 +327,10 @@ static void ui_rssi_task(lv_timer_t *arg)
         return;
     }
     
-    const uint8_t count = count_ble_nodes();
+    ble_node_t nodes[MAX_NEARBY_NODE];
+    ble_nodes_snapshot(nodes);
+    uint8_t count = 0;
+    for (int i = 0; i < MAX_NEARBY_NODE; i++) count += nodes[i].active;
     lv_table_set_row_count(table_rssi, count+1);
 
     char buf[BADGE_BUF_SIZE] = {0};
@@ -335,14 +338,14 @@ static void ui_rssi_task(lv_timer_t *arg)
     uint8_t pos = 1;
 
     for (int i = 0; i < MAX_NEARBY_NODE; i++) {
-        if(!ble_nodes[i].active) continue;
+        if(!nodes[i].active) continue;
         
-        lv_table_set_cell_value(table_rssi, pos, 0, ble_nodes[i].name);
+        lv_table_set_cell_value(table_rssi, pos, 0, nodes[i].name);
 
-        snprintf(buf, sizeof(buf), "%d dBm", ble_nodes[i].rssi);
+        snprintf(buf, sizeof(buf), "%d dBm", nodes[i].rssi);
         lv_table_set_cell_value(table_rssi, pos, 1, buf);
 
-        snprintf(buf, sizeof(buf), "0x0%d", ble_nodes[i].id);
+        snprintf(buf, sizeof(buf), "0x0%d", nodes[i].id);
         lv_table_set_cell_value(table_rssi, pos, 2, buf);
 
         pos++;
@@ -365,14 +368,16 @@ static void ui_radar_task(lv_timer_t *arg)
     if (lv_screen_active() == screen_radar)
     {
         static int mode;
+        ble_node_t nodes[MAX_NEARBY_NODE];
+        ble_nodes_snapshot(nodes);
         if (mode)
         {
             for (int i = 0; i < MAX_NEARBY_NODE; i++)
             {
-                if(ble_nodes[i].active) {
+                if(nodes[i].active) {
                     int32_t x = rand() % 80, y = rand() % 60;
 
-                    if (ble_nodes[i].rssi > -70)
+                    if (nodes[i].rssi > -70)
                     {
                         // near range.
                         if (x < 50)
@@ -384,7 +389,7 @@ static void ui_radar_task(lv_timer_t *arg)
                         else
                             y = (LV_VER_RES + y) / 2 - 20;
                     }
-                    else if (ble_nodes[i].rssi > -90)
+                    else if (nodes[i].rssi > -90)
                     {
                         // middle range.
                         if (x < 50)
@@ -410,7 +415,7 @@ static void ui_radar_task(lv_timer_t *arg)
                     }
 
                     lv_obj_set_pos(radar_node[i], x, y);
-                    lv_label_set_text_fmt(radar_node_number[i], "%d", ble_nodes[i].id);
+                    lv_label_set_text_fmt(radar_node_number[i], "%d", nodes[i].id);
                     lv_obj_set_hidden(radar_node[i], false);
                     lv_obj_fade_in(radar_node[i], 1000, 0);
                 } else {

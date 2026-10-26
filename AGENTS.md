@@ -1,4 +1,4 @@
 # Agent notes
 
-- Target is ESP32-C3. Before building in a fresh copy or build dir, run `idf.py set-target esp32c3`. Otherwise `idf.py` defaults to `esp32` and the link fails (for example, undefined `usb_serial_jtag_is_connected`).
+- Target is ESP32-C3, forced by `set(IDF_TARGET esp32c3)` in `CMakeLists.txt`; no `idf.py set-target` needed in a fresh copy or build dir.
 - A plain `idf.py flash` / esptool write can drop the USB link mid-image and leave the badge boot-looping. Recover with `tools/flash_chunked.sh <build_dir>` (64 KB chunks, retries each; re-enter download mode when it stalls). Use it for bricked badges only. Bootloader and partition table must already be written.

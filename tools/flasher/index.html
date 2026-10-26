@@ -1,0 +1,145 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Badge flasher</title>
+<style>
+  body { font: 14px system-ui; max-width: 760px; margin: 2em auto; padding: 0 1em; }
+  button, select, input { font: inherit; margin: 0 .3em .3em 0; }
+  table { border-collapse: collapse; width: 100%; margin: .5em 0; }
+  td { padding: .2em .4em; border-bottom: 1px solid #ddd; }
+  progress { width: 100%; }
+  pre#mon { height: 24em; }
+  pre { background: #111; color: #ddd; padding: .6em; height: 18em; overflow: auto; }
+</style>
+<h2>Badge flasher (esptool-js)</h2>
+<p id="warn" hidden>Web Serial unavailable: use Chrome/Edge on http://localhost.</p>
+<div>
+  <button id="connect">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  Baud <select id="baud"><option>115200</option><option>460800</option><option>921600</option></select>
+</div>
+<div>
+  <button id="loadBuild">Load from build/</button>
+  <input id="file" type="file" accept=".bin">
+  Offset <input id="addr" value="0x10000" size="10">
+  <button id="addFile">Add file</button>
+</div>
+<table id="rows"></table>
+<button id="flash" disabled>Flash</button>
+<progress id="bar" value="0" max="100"></progress>
+<pre id="log"></pre>
+<div>
+  <button id="monStart">Start serial monitor</button>
+  <button id="monStop" disabled>Stop</button>
+  <button id="monClear">Clear</button>
+  <label><input id="monAuto" type="checkbox" checked> after flash</label>
+</div>
+<pre id="mon"></pre>
+<script type="module">
+import { ESPLoader, Transport } from "./esptool-bundle.js";
+const $ = id => document.getElementById(id);
+const log = $("log");
+const term = {
+  clean() { log.textContent = ""; },
+  writeLine(s) { log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; },
+  write(s) { log.textContent += s; log.scrollTop = log.scrollHeight; },
+};
+let port, transport, loader, settings = { flash_mode: "dio", flash_freq: "80m", flash_size: "4MB" };
+const files = []; // {name, address, data, on}
+
+if (!("serial" in navigator)) $("warn").hidden = false;
+
+function render() {
+  $("rows").innerHTML = "";
+  files.forEach((f, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><input type=checkbox ${f.on ? "checked" : ""}></td><td>0x${f.address.toString(16)}</td><td>${f.name}</td><td>${f.data.length} B</td>`;
+    tr.querySelector("input").onchange = e => f.on = e.target.checked;
+    $("rows").append(tr);
+  });
+}
+
+$("loadBuild").onclick = async () => {
+  try {
+    const args = await (await fetch("/build/flasher_args.json")).json();
+    Object.assign(settings, args.flash_settings);
+    files.length = 0;
+    for (const [addr, path] of Object.entries(args.flash_files)) {
+      const r = await fetch("/build/" + path);
+      if (!r.ok) { term.writeLine(`skip ${path}: ${r.status}`); continue; }
+      files.push({ name: path, address: parseInt(addr), data: new Uint8Array(await r.arrayBuffer()), on: path === args.app.file });
+    }
+    render();
+  } catch (e) { term.writeLine("load failed: " + e); }
+};
+
+$("addFile").onclick = async () => {
+  const f = $("file").files[0], address = parseInt($("addr").value);
+  if (!f || isNaN(address)) return term.writeLine("pick file and valid offset");
+  files.push({ name: f.name, address, data: new Uint8Array(await f.arrayBuffer()), on: true });
+  render();
+};
+
+$("connect").onclick = async () => {
+  try {
+    if (monReader) { monReader.cancel(); await new Promise(r => setTimeout(r, 300)); }
+    port ??= await navigator.serial.requestPort();
+    transport = new Transport(port, true);
+    loader = new ESPLoader({ transport, baudrate: +$("baud").value, terminal: term });
+    term.writeLine("Chip: " + await loader.main());
+    $("connect").disabled = true; $("disconnect").disabled = false; $("flash").disabled = false;
+  } catch (e) { term.writeLine("connect failed: " + e); await transport?.disconnect().catch(() => {}); port = null; }
+};
+
+$("disconnect").onclick = async () => {
+  await transport.disconnect().catch(() => {});
+  port = null;
+  $("connect").disabled = false; $("disconnect").disabled = true; $("flash").disabled = true;
+};
+
+let monReader;
+async function startMonitor() {
+  if (monReader) return;
+  try {
+    if (transport) { await transport.disconnect().catch(() => {}); transport = null; }
+    port ??= await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) { return term.writeLine("monitor failed: " + e); }
+  $("monStart").disabled = true; $("monStop").disabled = false;
+  $("connect").disabled = false; $("disconnect").disabled = true; $("flash").disabled = true;
+  const mon = $("mon"), dec = new TextDecoder();
+  monReader = port.readable.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await monReader.read();
+      if (done) break;
+      const stick = mon.scrollTop + mon.clientHeight >= mon.scrollHeight - 5;
+      mon.textContent += dec.decode(value, { stream: true });
+      if (stick) mon.scrollTop = mon.scrollHeight;
+    }
+  } catch (e) { mon.textContent += "\n[read ended: " + e + "]\n"; }
+  monReader.releaseLock(); monReader = null;
+  await port.close().catch(() => {});
+  $("monStart").disabled = false; $("monStop").disabled = true;
+}
+$("monStart").onclick = startMonitor;
+$("monStop").onclick = () => monReader?.cancel();
+$("monClear").onclick = () => $("mon").textContent = "";
+
+$("flash").onclick = async () => {
+  const sel = files.filter(f => f.on);
+  if (!sel.length) return term.writeLine("nothing selected");
+  $("flash").disabled = true;
+  try {
+    await loader.writeFlash({
+      fileArray: sel.map(f => ({ data: f.data, address: f.address })),
+      flashMode: settings.flash_mode, flashFreq: settings.flash_freq, flashSize: settings.flash_size,
+      eraseAll: false, compress: true,
+      reportProgress: (i, w, t) => { $("bar").value = 100 * w / t; if (w === t) term.writeLine(`${sel[i].name} done`); },
+    });
+    await loader.after("hard_reset");
+    term.writeLine("Flashed, badge reset.");
+    if ($("monAuto").checked) startMonitor();
+  } catch (e) { term.writeLine("flash failed: " + e); }
+  $("flash").disabled = false;
+};
+</script>

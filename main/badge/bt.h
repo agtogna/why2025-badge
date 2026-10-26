@@ -21,7 +21,9 @@
 
 #define NODE_QUEUE_TIMEOUT_MS 20000
 
-void bt_init();
+#define BLE_INIT_MAX_WAITS 20 // seconds to wait for the controller before giving up
+
+esp_err_t bt_init();
 void bt_task(void *);
 
 #endif

@@ -278,10 +278,11 @@ static esp_err_t get_local_name (uint8_t *data_msg, uint8_t data_len, ble_scan_l
     return ESP_FAIL;
 }
 
-void bt_init()
+esp_err_t bt_init()
 {
     bool continue_commands = 1;
     int cmd_cnt = 0;
+    int waits = 0;
     esp_err_t ret;
     
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -289,24 +290,24 @@ void bt_init()
     ret = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     if (ret) {
         ESP_LOGI(__FILE__, "Bluetooth controller release classic bt memory failed: %s", esp_err_to_name(ret));
-        return;
+        return ret ? ret : ESP_FAIL;
     }
 
     if ((ret = esp_bt_controller_init(&bt_cfg)) != ESP_OK) {
         ESP_LOGI(__FILE__, "Bluetooth controller initialize failed: %s", esp_err_to_name(ret));
-        return;
+        return ret ? ret : ESP_FAIL;
     }
 
     if ((ret = esp_bt_controller_enable(ESP_BT_MODE_BLE)) != ESP_OK) {
         ESP_LOGI(__FILE__, "Bluetooth controller enable failed: %s", esp_err_to_name(ret));
-        return;
+        return ret ? ret : ESP_FAIL;
     }
 
     /* A queue for storing received HCI packets. */
     adv_queue = xQueueCreate(15, sizeof(host_rcv_data_t));
     if (adv_queue == NULL) {
         ESP_LOGE(__FILE__, "Queue creation failed\n");
-        return;
+        return ret ? ret : ESP_FAIL;
     }
 
     esp_vhci_host_register_callback(&vhci_host_cb);
@@ -328,10 +329,15 @@ void bt_init()
             }
             ESP_LOGI(__FILE__, "BLE Advertise, cmd_sent: %d", cmd_cnt);
         }
+        else if (++waits > BLE_INIT_MAX_WAITS) {
+            ESP_LOGE(__FILE__, "BLE controller never became ready");
+            return ESP_FAIL;
+        }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
     init_ble_nodes();
+    return ESP_OK;
 }
 
 void bt_task(void *unused)

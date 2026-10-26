@@ -11,8 +11,11 @@ void app_main()
     led_init();
     
     // start bluetooth
-    bt_init();
-    xTaskCreatePinnedToCore(bt_task, "bt_task", 4096, NULL, 6, NULL, 0);
+    if (bt_init() == ESP_OK) {
+        xTaskCreatePinnedToCore(bt_task, "bt_task", 4096, NULL, 6, NULL, 0);
+    } else {
+        ESP_LOGE(__FILE__, "BLE init failed, running without radar");
+    }
 
     // start wifi management
     wifi_init();

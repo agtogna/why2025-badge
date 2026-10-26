@@ -38,11 +38,14 @@ char* load_file_content(char* filename){
 
     char *content_buf = (char*) calloc(1, file_stat.st_size + 1);
     if(!content_buf) {
-        ESP_LOGI(__FILE__, "Cannot allocate memory");
+        ESP_LOGE(__FILE__, "Cannot allocate memory");
+        return NULL;
     }
     FILE *fp = fopen(filename, "r");
     if(!fp) {
-        ESP_LOGI(__FILE__, "Cannot open file");
+        ESP_LOGE(__FILE__, "Cannot open file");
+        free(content_buf);
+        return NULL;
     }
     fread(content_buf, 1, file_stat.st_size, fp);
     fclose(fp);
@@ -50,26 +53,34 @@ char* load_file_content(char* filename){
     return content_buf;
 }
 
+// NULL when the file is missing, unreadable or not valid JSON
+static cJSON* load_json(char* filename) {
+    char* content = load_file_content(filename);
+    cJSON* json = cJSON_Parse(content);
+    free(content);
+    return json;
+}
+
 cJSON* load_default() {
-    char* default_content = load_file_content(DEFAULT_FILE);
-    return cJSON_Parse(default_content);
+    return load_json(DEFAULT_FILE);
 }
 
 cJSON* load_settings() {
-    char* default_content = load_file_content(SETTINGS_FILE);
-    return cJSON_Parse(default_content);
+    return load_json(SETTINGS_FILE);
 }
 
 const char* json_get_str_value(cJSON* obj, const char *key)
 {
-    char* value = cJSON_GetObjectItem(obj, key)->valuestring;
+    cJSON* item = cJSON_GetObjectItem(obj, key);
+    const char* value = cJSON_IsString(item) ? item->valuestring : "";
     ESP_LOGI(__FILE__, "Get %s value: %s", key, value);
     return value;
 }
 
 int json_get_int_value(cJSON* obj, const char *key)
 {
-    int value = cJSON_GetObjectItem(obj, key)->valueint;
+    cJSON* item = cJSON_GetObjectItem(obj, key);
+    int value = cJSON_IsNumber(item) ? item->valueint : 0;
     ESP_LOGI(__FILE__, "Get %s value: %d", key, value);
     return value;
 }
@@ -95,14 +106,53 @@ void json_set_int_value(cJSON* obj, const char *key, const double value)
 }
 
 void save_settings(cJSON* json_settings) {
-    // Save to settings.json
+    // Write a temp file first: a power cut while writing must not leave a truncated settings.json
     char *json = cJSON_Print(json_settings);
-    FILE *fp = fopen(SETTINGS_FILE, "w");
-    fprintf(fp, "%s", json);
+    FILE *fp = fopen(SETTINGS_TMP_FILE, "w");
+    if (!fp || !json) {
+        ESP_LOGE(__FILE__, "Cannot write settings");
+        if (fp) fclose(fp);
+        cJSON_free(json);
+        return;
+    }
+    int written = fprintf(fp, "%s", json);
     cJSON_free(json);
-    fclose(fp);
-    
+    if (fclose(fp) != 0 || written < 0) {
+        ESP_LOGE(__FILE__, "Settings write failed");
+        unlink(SETTINGS_TMP_FILE);
+        return;
+    }
+
+    unlink(SETTINGS_FILE); // SPIFFS rename does not replace an existing file
+    if (rename(SETTINGS_TMP_FILE, SETTINGS_FILE) != 0) {
+        ESP_LOGE(__FILE__, "Cannot rename settings file");
+        return;
+    }
+
     ESP_LOGI(__FILE__, "Setting file saved");
+}
+
+static bool has_str(cJSON* obj, const char *key) {
+    return cJSON_IsString(cJSON_GetObjectItem(obj, key));
+}
+
+static bool has_num(cJSON* obj, const char *key) {
+    return cJSON_IsNumber(cJSON_GetObjectItem(obj, key));
+}
+
+// Every key badge_init() reads must be there, or it would dereference NULL on each boot
+static bool settings_valid(cJSON* json) {
+    cJSON *badge = cJSON_GetObjectItem(json, "badge");
+    cJSON *web = cJSON_GetObjectItem(json, "web");
+    cJSON *ap = cJSON_GetObjectItem(json, "ap");
+    cJSON *sta = cJSON_GetObjectItem(json, "sta");
+    cJSON *display = cJSON_GetObjectItem(json, "display");
+
+    if (!cJSON_IsObject(badge) || !cJSON_IsObject(web) || !cJSON_IsObject(ap) || !cJSON_IsObject(sta)) return false;
+    if (!has_str(badge, "name") || !has_num(badge, "id") || !has_str(web, "login")) return false;
+    if (!has_str(ap, "ssid") || !has_str(ap, "password") || !has_str(sta, "ssid") || !has_str(sta, "password")) return false;
+    // display is optional, but a half-filled one is not
+    return !display || (has_num(display, "brightness_max") && has_num(display, "brightness_mid") && has_num(display, "brightness_off"));
 }
 
 bool update_attribute(int id, char* data) { 
@@ -150,11 +200,12 @@ void badge_init(){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // Init settings
-    struct stat file_stat;
+    cJSON* json_settings = load_settings();
 
-    cJSON* json_settings = NULL;
-
-    if (stat(SETTINGS_FILE, &file_stat) == -1) {
+    if (!settings_valid(json_settings)) {
+        ESP_LOGW(__FILE__, "Settings missing or corrupt, restoring defaults");
+        cJSON_Delete(json_settings);
+        unlink(SETTINGS_FILE);
         json_settings = load_default();
 
         cJSON *obj_badge = cJSON_GetObjectItem(json_settings, "badge");
@@ -196,6 +247,7 @@ void badge_init(){
 
         // Save to settings.json
         save_settings(json_settings);
+        cJSON_Delete(json_settings);
         
         ESP_LOGI(__FILE__, "Setting file saved to default values");
     }

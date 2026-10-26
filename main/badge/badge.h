@@ -22,6 +22,7 @@
 #include "ui.h"
 
 #define SETTINGS_FILE "/data/settings.json"
+#define SETTINGS_TMP_FILE "/data/settings.tmp"
 #define DEFAULT_FILE "/data/default.json"
 
 #define BADGE_BUF_SIZE 20

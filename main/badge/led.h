@@ -41,7 +41,7 @@ void set_easter_egg_active(bool active);
 
 // Continuous, non-blocking rainbow LED animations, driven from led_task's own
 // loop (not LVGL) so they never stall the UI. Toggle on/off from the rainbow
-// screen's enter/leave handling in ui.c; cycle through the 5 animations
+// screen's enter/leave handling in ui.c; cycle through the 6 animations
 // (short-press either wheel on that screen) with rainbow_next_animation(), and
 // read the active one's display name with rainbow_current_animation_name().
 void set_rainbow_loop_active(bool active);

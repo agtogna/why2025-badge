@@ -416,6 +416,17 @@ static void comet_step(void) {
     comet_hue += 5;
 }
 
+// ---- 6. Flashlight: all 7 LEDs solid white, written once (reset re-arms it).
+static bool flashlight_lit;
+
+static void flashlight_reset(void) { flashlight_lit = false; }
+
+static void flashlight_step(void) {
+    if (flashlight_lit) return;
+    flashlight_lit = true;
+    for (int i = 0; i < NUM_LEDS; i++) led_rgb_color(i, rgb_from_code(0xFFFFFF));
+}
+
 // ---- dispatch table ----
 typedef struct {
     const char *name;
@@ -429,6 +440,7 @@ static const rainbow_anim_t rainbow_anims[] = {
     { "Strobe Party",    strobe_step,  strobe_reset },
     { "Twinkle Sparkle", twinkle_step, twinkle_reset },
     { "Comet Spin",      comet_step,   comet_reset },
+    { "Flashlight",      flashlight_step, flashlight_reset },
 };
 #define NUM_RAINBOW_ANIMS (sizeof(rainbow_anims) / sizeof(rainbow_anims[0]))
 

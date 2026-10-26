@@ -205,9 +205,7 @@ void ui_button_up()
                     break;
                 case ADMIN_STATE_STA: // STA connected: manual IP refresh
                     ESP_LOGI("UI", "Manual IP refresh triggered via UP button");
-                    ui_manual_ip_update();
-                    // Also test forcing labels to be visible for debugging
-                    ui_force_show_ip_labels();
+                    ui_update_ip_info();
                     break;
             }   
             break;
@@ -268,9 +266,8 @@ void ui_button_down()
                     admin_state = ADMIN_STATE_STA;
 #endif
                     break;
-                case ADMIN_STATE_AP: // AP enabled: test showing IP labels
-                    ESP_LOGI("UI", "Force show IP labels test (DOWN button in AP mode)");
-                    ui_force_show_ip_labels();
+                case ADMIN_STATE_AP: // AP enabled: refresh IP labels
+                    ui_update_ip_info();
                     break;
                 case ADMIN_STATE_STA: // STA enabled: disable STA
                     ui_send_wifi_event(EVENT_STA_STOP);
@@ -1113,14 +1110,4 @@ void ui_list_all_netifs() {
     
     ESP_LOGI("UI", "Total network interfaces found: %d", count);
     ESP_LOGI("UI", "=== END NETIF LISTING ===");
-}
-
-void ui_manual_ip_update() {
-    ESP_LOGI("UI", "Manual IP update triggered from admin screen");
-    ui_update_ip_info();
-}
-
-void ui_force_show_ip_labels() {
-    ESP_LOGI("UI", "Force showing IP labels for testing - calling ui_update_ip_info instead");
-    ui_update_ip_info();
 }

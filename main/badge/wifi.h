@@ -22,7 +22,6 @@ void wifi_init(void);
 
 bool start_wifi_ap(void);
 bool start_wifi_sta(void);
-bool start_wifi_apsta(void);
 
 void stop_wifi(void);
 

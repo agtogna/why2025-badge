@@ -201,66 +201,6 @@ bool start_wifi_sta()
 	return (bits & CONNECTED_BIT) != 0;
 }
 
-bool start_wifi_apsta()
-{
-	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
-	
-	const char* AP_WIFI_SSID = badge_obj.ap_ssid;
-	const char* AP_WIFI_PASSWORD = badge_obj.ap_password;
-	const char* STA_WIFI_SSID = badge_obj.sta_ssid;
-	const char* STA_WIFI_PASSWORD = badge_obj.sta_password;
-
-	wifi_config_t ap_config = { 0 };
-	
-	snprintf((char*)ap_config.ap.ssid, SIZEOF(ap_config.ap.ssid), "%s", AP_WIFI_SSID);
-	snprintf((char*)ap_config.ap.password, SIZEOF(ap_config.ap.password), "%s", AP_WIFI_PASSWORD);
-	ap_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
-	ap_config.ap.ssid_len = strlen(AP_WIFI_SSID);
-	ap_config.ap.max_connection = AP_MAX_STA_CONN;
-
-	if (strlen(AP_WIFI_PASSWORD) == 0) {
-		ap_config.ap.authmode = WIFI_AUTH_OPEN;
-	}
-
-	wifi_config_t sta_config = { 0 };
-	snprintf((char*)sta_config.sta.ssid, SIZEOF(sta_config.sta.ssid), "%s", STA_WIFI_SSID);
-	if (badge_obj.sta_enterprise) {
-		sta_config.sta.pmf_cfg.capable = true;
-		sta_config.sta.pmf_cfg.required = false;
-	} else {
-		snprintf((char*)sta_config.sta.password, SIZEOF(sta_config.sta.password), "%s", STA_WIFI_PASSWORD);
-	}
-
-
-	ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_APSTA) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_AP, &ap_config) );
-	ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &sta_config) );
-	if (badge_obj.sta_enterprise) {
-		sta_apply_enterprise();
-	}
-	ESP_ERROR_CHECK( esp_wifi_start() );
-	ESP_LOGI(TAG, "WIFI_MODE_AP started. SSID:%s password:%s",
-			 AP_WIFI_SSID, AP_WIFI_PASSWORD);
-
-	curr_mode = WIFI_MODE_APSTA;   // set before the wait: stop_wifi() on failure resets it to NULL
-	ESP_ERROR_CHECK( esp_wifi_connect() );
-	int bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
-								   pdFALSE, pdTRUE, STA_TIMEOUT_MS / portTICK_PERIOD_MS);
-	ESP_LOGI(TAG, "bits=%x", bits);
-	if (bits & CONNECTED_BIT) {
-		ESP_LOGI(TAG, "WIFI_MODE_STA connected. SSID:%s password:%s",
-			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
-	} else {
-		ESP_LOGI(TAG, "WIFI_MODE_STA can't connected. SSID:%s password:%s",
-			 STA_WIFI_SSID, STA_WIFI_PASSWORD);
-		stop_wifi();
-	}
-
-	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
-
-	return (bits & CONNECTED_BIT) != 0;
-}
-
 void stop_wifi(){
 	ESP_LOGI(__FILE__, "free_heap_size = %lu\n", esp_get_free_heap_size());
 

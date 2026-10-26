@@ -38,9 +38,8 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filepa
 static esp_err_t get_handler(httpd_req_t *req)
 {
     char filepath[FILE_PATH_MAX];
-    printf("free_heap_size = %lu\n", esp_get_free_heap_size());
-    rest_context = (rest_server_context_t *)req->user_ctx;
-    strlcpy(filepath, rest_context->base_path, sizeof(filepath));
+    rest_server_context_t *ctx = (rest_server_context_t *)req->user_ctx;
+    strlcpy(filepath, ctx->base_path, sizeof(filepath));
     if (req->uri[strlen(req->uri) - 1] == '/') {
         strlcat(filepath, "/index.html", sizeof(filepath));
     } else {
@@ -55,9 +54,8 @@ static esp_err_t get_handler(httpd_req_t *req)
     }
 
     set_content_type_from_file(req, filepath);
-    printf("free_heap_size = %lu\n", esp_get_free_heap_size());
 
-    char *chunk = rest_context->scratch;
+    char *chunk = ctx->scratch;
     ssize_t read_bytes;
     do {
         /* Read file in chunks into the scratch buffer */
@@ -73,7 +71,6 @@ static esp_err_t get_handler(httpd_req_t *req)
                 httpd_resp_sendstr_chunk(req, NULL);
                 /* Respond with 500 Internal Server Error */
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
-                printf("free_heap_size = %lu\n", esp_get_free_heap_size());
                 return ESP_FAIL;
             }
         }

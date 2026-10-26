@@ -75,8 +75,6 @@ void ui_task(void *);
 void button_task(void *arg);
 
 void ui_update_ip_info();
-void ui_manual_ip_update();
-void ui_force_show_ip_labels();
 void ui_list_all_netifs();
 void ui_connection_progress(uint8_t cur, uint8_t max);
 

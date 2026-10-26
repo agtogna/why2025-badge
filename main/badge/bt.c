@@ -251,13 +251,20 @@ static esp_err_t get_local_name (uint8_t *data_msg, uint8_t data_len, ble_scan_l
     uint8_t curr_ptr = 0, curr_len, curr_type;
     while (curr_ptr < data_len) {
         curr_len = data_msg[curr_ptr++];
+        if (curr_len == 0 || curr_ptr >= data_len) {
+            return ESP_FAIL;
+        }
         curr_type = data_msg[curr_ptr++];
-        if (curr_len == 0) {
+        /* The AD length comes from a stranger's advert: keep it inside the packet. */
+        if (curr_ptr + curr_len - 1 > data_len) {
             return ESP_FAIL;
         }
 
         /* Search for current data type and see if it contains name as data (0x08 or 0x09). */
         if (curr_type == 0x08 || curr_type == 0x09) {
+            if (curr_len - 1 >= sizeof(scanned_packet->scan_local_name)) {
+                return ESP_FAIL;
+            }
             for (uint8_t i = 0; i < curr_len - 1; i += 1) {
                 scanned_packet->scan_local_name[i] = data_msg[curr_ptr + i];
             }
@@ -337,7 +344,8 @@ void bt_task(void *unused)
     esp_err_t ret;
 
     while (1) {
-        uint8_t sub_event, num_responses, total_data_len, data_msg_ptr, hci_event_opcode;
+        uint8_t sub_event, num_responses, hci_event_opcode;
+        uint16_t total_data_len, data_msg_ptr;
         uint8_t *queue_data = NULL, *event_type = NULL, *addr_type = NULL, *addr = NULL, *data_len = NULL, *data_msg = NULL;
         short int *rssi = NULL;
         uint16_t data_ptr;
@@ -429,7 +437,7 @@ void bt_task(void *unused)
 
                     /* Counts of advertisements done. This count is set in advertising data every time before advertising. */
                     rssi = (short int *)malloc(sizeof(short int) * num_responses);
-                    if (data_len == NULL) {
+                    if (rssi == NULL) {
                         ESP_LOGE(__FILE__, "Malloc rssi failed!");
                         goto reset;
                     }
@@ -440,12 +448,13 @@ void bt_task(void *unused)
                     /* Extracting advertiser's name. */
                     data_msg_ptr = 0;
                     scanned_name = (ble_scan_local_name_t *)malloc(num_responses * sizeof(ble_scan_local_name_t));
-                    if (data_len == NULL) {
+                    if (scanned_name == NULL) {
                         ESP_LOGE(__FILE__, "Malloc scanned_name failed!");
                         goto reset;
                     }
                     for (uint8_t i = 0; i < num_responses; i += 1) {
                         ret = get_local_name(&data_msg[data_msg_ptr], data_len[i], scanned_name);
+                        data_msg_ptr += data_len[i];
 
                         /* Print the data if adv report has a valid name. */
                         if (ret == ESP_OK) {

@@ -125,7 +125,7 @@ static bool ui_update_backlight(bool trigger)
 
 void ui_send_wifi_event(int event)
 {
-    xQueueSend(wifi_queue, &event, portMAX_DELAY);
+    xQueueSend(wifi_queue, &event, 0); // called under the LVGL lock: drop the event rather than freeze the UI
 }
 
 // Ask wifi_task to start/stop scanning; only sends on a state change.

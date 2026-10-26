@@ -9,7 +9,12 @@ void app_main()
 
     badge_init();
     led_init();
-    
+
+    // Bring the display up before the radios: bt_init/wifi_init take ~1 s and would delay the
+    // first image. Priority above app_main so it preempts them; it deletes itself when done.
+    // ESP32-C3 is single core: everything runs on core 0 (IDF 5+ asserts on core 1).
+    xTaskCreatePinnedToCore(ui_task, "ui_task", 8192, NULL, 6, NULL, 0);
+
     // start bluetooth
     if (bt_init() == ESP_OK) {
         xTaskCreatePinnedToCore(bt_task, "bt_task", 4096, NULL, 6, NULL, 0);
@@ -20,9 +25,6 @@ void app_main()
     // start wifi management
     wifi_init();
     xTaskCreatePinnedToCore(wifi_task, "wifi_task", 4096, NULL, 5, NULL, 0);
-
-    // ESP32-C3 is single core: everything runs on core 0 (IDF 5+ asserts on core 1).
-    xTaskCreatePinnedToCore(ui_task, "ui_task", 8192, NULL, 0, NULL, 0);
 
     xTaskCreatePinnedToCore(led_task, "led_task", 2048, NULL, 10, NULL, 0);
 

@@ -104,3 +104,5 @@ CONFIG_ESP_EVENT_POST_FROM_ISR=n
 CONFIG_LWIP_IPV6=n
 # BLE controller activities: one advertiser + one scanner + headroom
 CONFIG_BT_CTRL_BLE_MAX_ACT=4
+# faster boot: skip app image hash check on power-on
+CONFIG_BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON=y
